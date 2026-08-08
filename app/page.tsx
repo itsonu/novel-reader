@@ -2,8 +2,14 @@ import Link from 'next/link';
 import { publicClient, cloudEnabled, type Novel } from '@/lib/supabase';
 import Reveal from '@/components/Reveal';
 import SampleLine from '@/components/SampleLine';
+import SpokenProse from '@/components/SpokenProse';
+import ResumeLink from '@/components/ResumeLink';
 
 export const revalidate = 300;
+
+// The headline arrives the way the narrator delivers it: one word at a time.
+// Flat index drives the stagger so the cadence carries across line breaks.
+const HERO_LINES = [['Every', 'word,'], ['spoken', 'aloud'], ['as', 'you', 'read', 'it.']];
 
 async function publicNovels(): Promise<Novel[]> {
   if (!cloudEnabled()) return [];
@@ -19,30 +25,35 @@ export default async function Home() {
 
   return (
     <>
-      <nav className="topbar chrome">
-        <span className="wordmark">Reader</span>
-        <div className="navlinks">
-          <Link href="/read" className="btn" data-variant="ghost">Open a folder</Link>
-          <Link href="/publish" className="btn" data-variant="primary">Add a novel</Link>
-        </div>
-      </nav>
-
-      <main>
+      <main className="landing">
         {/* hero */}
         <section className="hero-wrap">
           <Reveal>
-            <p className="eyebrow caption">Read or listen · free · no account</p>
             <h1 className="display hero-title">
-              Every word,<br />spoken aloud<br />
-              <em>as you read it.</em>
+              {HERO_LINES.map((line, li) => {
+                const before = HERO_LINES.slice(0, li).reduce((n, l) => n + l.length, 0);
+                const Line = li === 2 ? 'em' : 'span';
+                return (
+                  <Line key={li} className="hl">
+                    {line.map((w, wi) => (
+                      <span
+                        key={wi}
+                        className="hw"
+                        style={{ ['--d' as string]: `${(before + wi) * 58}ms` }}
+                      >{w}</span>
+                    ))}
+                  </Line>
+                );
+              })}
             </h1>
             <p className="lede">
               Point it at a folder of chapters, or open a novel someone published.
               A narrator reads; the page follows along, word by word.
             </p>
             <div className="cta">
-              <Link href="/read" className="btn" data-variant="primary">Start reading</Link>
-              <Link href="#how" className="btn">How it works</Link>
+              {/* Turns into "Continue <book>" once there's something to continue. */}
+              <ResumeLink />
+              <Link href="/library" className="btn">Your library</Link>
             </div>
           </Reveal>
 
@@ -52,25 +63,13 @@ export default async function Home() {
           </Reveal>
         </section>
 
-        {/* what it does */}
+        {/* What it does, read rather than listed: scrolling narrates it. */}
         <section id="how" className="rail">
-          {[
-            ['Any folder of markdown', 'Chapter order, titles and word counts come from the files. Nothing to configure, nothing to upload.'],
-            ['Two voices, one tap', 'Your device speaks instantly. A better neural voice downloads once, then works offline forever.'],
-            ['Reads like a book', 'Serif prose at a real measure, adjustable size, light and dark. No ads between paragraphs.'],
-            ['Yours to keep', 'The library lives on your device. Install it and it works with no connection at all.']
-          ].map(([h, p], i) => (
-            <Reveal key={h} delay={i * 70}>
-              <article className="card">
-                <h3 className="title">{h}</h3>
-                <p className="caption">{p}</p>
-              </article>
-            </Reveal>
-          ))}
+          <SpokenProse />
         </section>
 
         {novels.length > 0 && (
-          <section className="shelf">
+          <section id="published" className="shelf">
             <Reveal>
               <h2 className="section-h display">Published here</h2>
             </Reveal>
@@ -92,16 +91,29 @@ export default async function Home() {
           </section>
         )}
 
+        {/* No Reveal here on purpose: one authored entrance per page, and the
+            passage above already owns the motion. */}
         <section className="closer">
-          <Reveal>
-            <h2 className="display">Bring your own book.</h2>
-            <Link href="/read" className="btn" data-variant="primary">Open a folder</Link>
-            <p className="caption fineprint">
-              Files stay on your device. No account, no tracking, no upload.
-            </p>
-          </Reveal>
+          <h2 className="display">Bring your own book.</h2>
+          <div className="cta center">
+            <Link href="/library" className="btn" data-variant="primary">Open your library</Link>
+            <Link href="/publish" className="btn">Add a novel</Link>
+          </div>
+          <p className="caption fineprint">
+            Files stay on your device. No account, no tracking, no upload.
+          </p>
         </section>
       </main>
+
+      <footer className="footer">
+        <span className="wordmark">Reader</span>
+        <nav className="navlinks caption" aria-label="Footer">
+          <Link href="/">Discover</Link>
+          <Link href="/library">Library</Link>
+          <Link href="/publish">Add a novel</Link>
+          <Link href="/#how">How it works</Link>
+        </nav>
+      </footer>
     </>
   );
 }

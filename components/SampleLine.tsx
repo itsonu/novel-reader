@@ -44,7 +44,7 @@ export default function SampleLine() {
   }, [running]);
 
   return (
-    <div ref={host} className="demo">
+    <div ref={host} className="demo" data-live={i >= 0}>
       <p className="line">
         {WORDS.map((w, k) => (
           <span key={k} className={k === i ? 'w on' : k < i ? 'w past' : 'w'}>{w} </span>
@@ -57,12 +57,23 @@ export default function SampleLine() {
 
       <style jsx>{`
         .demo {
+          position: relative;
           margin-top: clamp(2.5rem, 6vw, 4rem);
-          border: 1px solid var(--rule); border-radius: 1.1rem;
+          border: 1px solid var(--rule); border-radius: var(--r-sheet, 1.25rem);
           background: color-mix(in oklab, var(--ink) 4%, transparent);
           padding: clamp(1.25rem, 3vw, 2rem);
           max-width: 34rem;
+          box-shadow: var(--e-3);
         }
+        /* the card warms while it is speaking and cools when it stops —
+           the only state this demo needs to advertise */
+        .demo::before {
+          content: ''; position: absolute; inset: -1px; border-radius: inherit;
+          pointer-events: none; z-index: -1;
+          background: radial-gradient(60% 80% at 50% 0%, color-mix(in oklab, var(--accent) 16%, transparent), transparent 70%);
+          opacity: 0; transition: opacity 900ms ease-out;
+        }
+        .demo[data-live='true']::before { opacity: 1; }
         .line {
           font-family: var(--serif); font-size: clamp(1.05rem, 2.4vw, 1.28rem);
           line-height: 1.75; margin: 0 0 1.1rem; color: var(--ink-dim);

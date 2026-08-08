@@ -93,7 +93,7 @@ export default function Player({
   };
 
   const mood: Mood =
-    state.loadPct != null ? 'thinking'
+    state.loadPct != null || state.buffering != null ? 'thinking'
       : state.paused ? 'paused'
       : state.playing ? 'speaking'
       : state.spoken >= 0 ? 'done' : 'idle';
@@ -147,9 +147,20 @@ export default function Player({
             <svg viewBox="0 0 24 24" width="18" height="18"><path d="M12 19V5M6 12l6 6 6-6" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
           </button>
 
-          <span className="time mono caption">
-            {clock(elapsed)} <span className="sep">/</span> {clock(total)}
-          </span>
+          {/* While the opening reserve is being banked there is no elapsed time to
+              show yet, and a frozen 0:00 reads as broken. Show the fill instead. */}
+          {state.buffering != null ? (
+            <span className="time buffering caption" role="status">
+              Buffering
+              <span className="bufbar" aria-hidden>
+                <span style={{ transform: `scaleX(${state.buffering})` }} />
+              </span>
+            </span>
+          ) : (
+            <span className="time mono caption">
+              {clock(elapsed)} <span className="sep">/</span> {clock(total)}
+            </span>
+          )}
 
           <span className="grow" />
 
@@ -206,7 +217,7 @@ export default function Player({
 
       <style jsx>{`
         .player {
-          position: fixed; inset: auto 0 0 0; z-index: 40;
+          position: fixed; inset: auto 0 0 0; z-index: var(--z-player);
           padding: 0 0 env(safe-area-inset-bottom);
         }
         /* scrubber */
@@ -246,6 +257,15 @@ export default function Player({
         .ctl.upgrade { color: var(--accent); }
         .pct { font-size: 0.7rem; }
         .time { margin-inline: 0.5rem 0; white-space: nowrap; }
+        .buffering { display: flex; align-items: center; gap: var(--s-3); color: var(--ink-dim); }
+        .bufbar {
+          display: block; width: 3rem; height: 3px; border-radius: var(--r-round);
+          background: color-mix(in oklab, var(--ink) 16%, transparent); overflow: hidden;
+        }
+        .bufbar :global(span) {
+          display: block; height: 100%; background: var(--accent);
+          transform-origin: left; transition: transform var(--quick) linear;
+        }
         .sep { opacity: 0.5; }
         .grow { flex: 1; }
         .face { margin-inline-start: 0.3rem; display: grid; place-items: center; }

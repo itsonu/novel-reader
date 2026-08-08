@@ -11,7 +11,7 @@
     "deploy": "npm run build:pages && node scripts/deploy-pages.mjs",
     "preview:static": "npm run build:static && npx serve out",
     "lint": "next lint",
-    "check": "node scripts/check-library.mjs && node scripts/check-chapters.mjs && node scripts/check-sync.mjs"
+    "check": "node scripts/check-library.mjs && node scripts/check-chapters.mjs && node scripts/check-sync.mjs && node scripts/check-timing.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",

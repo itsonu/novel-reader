@@ -31,10 +31,20 @@ the static build, so it doesn't qualify as a default.
 `VoiceProvider` in `lib/reader/providers.ts` is the whole contract:
 
 ```ts
-prepare(text, tokens, offset) -> () => { cues, duration, ended }
+prepare(text, tokens, offset) -> Promise<Clip>   // Clip = { duration, start(when) }
+now() -> number          // the clock `when` is expressed in
+ready() -> Promise<void> // resolve once it is safe to schedule
 pause() / resume() / stop()
 listVoices() -> string[]
 ```
+
+`prepare` synthesises but does not play. The player decides *when* each clip starts and
+places it exactly where the previous one ends, which is what keeps narration gapless — so
+`start(when)` must honour `when` rather than beginning immediately. An engine with no
+clock of its own (Web Speech) may treat `when` as advisory, but must then report a real
+`onStart` so the player can re-anchor. `stop()` must cancel **every** clip it has been
+handed, including ones scheduled for the future; cancelling only the audible one leaves
+the rest to play over the top after a seek.
 
 A new engine needs only that. If it can report the synthesised audio duration, cues are
 exact and no estimator runs. Register it beside `KokoroVoice`, add a row to the settings

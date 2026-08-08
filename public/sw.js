@@ -29,7 +29,10 @@ self.addEventListener('fetch', event => {
   const url = new URL(request.url);
 
   // 1. Voice model weights — cache first, forever. This is the expensive one.
-  if (/huggingface\.co|hf\.co|cdn-lfs/.test(url.hostname) || /\.onnx($|\?)/.test(url.pathname)) {
+  // .wasm matters as much as .onnx: the ONNX runtime itself is ~21MB fetched from
+  // jsDelivr, and without it cached the app can download the whole voice model and
+  // still fail to speak offline.
+  if (/huggingface\.co|hf\.co|cdn-lfs/.test(url.hostname) || /\.(onnx|wasm)($|\?)/.test(url.pathname)) {
     event.respondWith(
       caches.open(MODELS).then(async cache => {
         const hit = await cache.match(request);

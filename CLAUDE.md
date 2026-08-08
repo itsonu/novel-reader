@@ -31,7 +31,7 @@ lib/reader/markdown.ts   isomorphic md + front matter + ordering (server-rendere
 lib/reader/tokenize.ts   wraps rendered DOM text in <span class="w" data-i>
 lib/reader/timing.ts     word-duration estimator
 lib/reader/providers.ts  SystemVoice (Web Speech) | KokoroVoice (ONNX, lazy)
-lib/reader/usePlayer.ts  transport, cue scheduling, one-ahead synthesis
+lib/reader/usePlayer.ts  transport, cue scheduling, buffered look-ahead synthesis
 lib/library.ts           IndexedDB: novels, progress, folder handle
 lib/mode.ts              capability flags
 lib/voices.ts            voice naming (accent + gender + timbre)
@@ -51,7 +51,11 @@ lib/seo.ts               metadata + JSON-LD
   stops estimating once real boundaries arrive.
 - **The Kokoro model cache is deliberately un-versioned** (`models-v1` in `public/sw.js`)
   so an app update never re-downloads 80MB of weights.
-- **Kokoro loads only on user intent**, never at page load.
+- **Kokoro loads only on user intent**, never at page load, and synthesises in a Web
+  Worker (`lib/reader/tts.worker.ts`) so inference never blocks the highlight loop.
+- **Audio is scheduled, not started.** Clips are placed on `AudioContext.currentTime` at
+  the exact moment the previous one ends, and the player banks a reserve ahead of the
+  play head. Anything that starts a clip with a bare `start()` reintroduces the gap.
 
 ## Style
 

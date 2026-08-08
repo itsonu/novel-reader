@@ -1,8 +1,24 @@
 'use client';
+// Transport, buffering and cue scheduling.
+//
+// The engine banks a reserve of synthesised audio ahead of the play head and schedules
+// each clip against the provider's own clock, so consecutive sentences butt up against
+// each other. It used to synthesise exactly one sentence ahead and start each one with
+// a bare src.start() after the previous sentence's `onended` had round-tripped through
+// two promises and a React render — which is why every paragraph break had a hole in it.
+//
+// Three invariants hold this together:
+//   * `cursor` is the clock time the next clip begins. Clips are scheduled at `cursor`,
+//     never at "now", so joins are sample-accurate.
+//   * `state.sentence` follows the *audible* sentence, not the scheduled one. Without
+//     that the scrubber and the resume point would lead the voice by several sentences.
+//   * cue times in `cueQ` are absolute and monotonic, drained by ONE rAF loop. A loop
+//     per sentence cannot express two sentences being scheduled at once.
+
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { wrapWords, groupSentences, sentenceText, sentenceTokens, type Token, type Sentence } from './tokenize';
-import { KokoroVoice, SystemVoice, type VoiceProvider } from './providers';
-import { weight as tokenWeight } from './timing';
+import { KokoroVoice, SystemVoice, type Clip, type SpeakHandle, type VoiceProvider } from './providers';
+import { weight as tokenWeight, nextStart } from './timing';
 
 export type PlayerState = {
   ready: boolean;
@@ -15,7 +31,20 @@ export type PlayerState = {
   loadPct: number | null;  // kokoro download
   loadFile: string;
   status: string;
+  /** 0..1 while banking the opening reserve, null once playing. */
+  buffering: number | null;
 };
+
+/** Never schedule in the past: a clip placed at a `when` already gone plays immediately. */
+const LEAD = 0.08;
+/** Seconds of audio banked before the first word. Cached clips resolve instantly, so
+ *  seeking back into already-heard text skips this entirely. */
+const PREROLL = 8;
+/** How far ahead of the play head to keep synthesising. Time-bounded, not count-bounded:
+ *  a 45-token sentence and a three-word one are not the same amount of buffer. */
+const LOOKAHEAD = { kokoro: 8, system: 3 };
+/** Cached clips. ~350KB per sentence buffer, so this caps at roughly 14MB. */
+const CACHE_MAX = 40;
 
 export function usePlayer(proseRef: React.RefObject<HTMLElement>, deps: unknown[]) {
   const tokens = useRef<Token[]>([]);
@@ -25,11 +54,26 @@ export function usePlayer(proseRef: React.RefObject<HTMLElement>, deps: unknown[
   const abort = useRef(0);
   const userScroll = useRef(0);
   const boundaries = useRef(false);      // does this engine emit word boundaries?
-  const estimateTimer = useRef(0);
+
+  /* Prefix sum of token weights, built once per chapter. `timing()` is called on every
+     Player render and mark() re-renders per word, so an O(all tokens) scan there was
+     ~2300 iterations per spoken word — on the same thread as speech synthesis. */
+  const cum = useRef<Float64Array>(new Float64Array(1));
+
+  const cache = useRef(new Map<number, Promise<Clip>>());
+  const cueQ = useRef<{ i: number; at: number }[]>([]);
+  const cueHead = useRef(0);
+  const sentQ = useRef<{ sent: number; at: number }[]>([]);
+  const sentHead = useRef(0);
+  const cursor = useRef(0);
+  /** Estimated cues are held back briefly in case a real boundary event beats them. */
+  const holdUntil = useRef(0);
+
   const [voiceIds, setVoiceIds] = useState<string[]>([]);
   const [s, set] = useState<PlayerState>({
     ready: false, playing: false, paused: false, kind: 'system',
-    spoken: -1, sentence: 0, sentences: 0, loadPct: null, loadFile: '', status: ''
+    spoken: -1, sentence: 0, sentences: 0, loadPct: null, loadFile: '', status: '',
+    buffering: null
   });
   const patch = (p: Partial<PlayerState>) => set(x => ({ ...x, ...p }));
 
@@ -40,6 +84,12 @@ export function usePlayer(proseRef: React.RefObject<HTMLElement>, deps: unknown[
      land. Handlers read this ref instead; setState stays pure. */
   const live = useRef(s);
   live.current = s;
+
+  const resetQueues = () => {
+    cueQ.current.length = 0; cueHead.current = 0;
+    sentQ.current.length = 0; sentHead.current = 0;
+    cursor.current = 0;
+  };
 
   /* Tokenise once per chapter, before paint.
      Keyed on the rendered HTML — that's what determines the DOM we're wrapping.
@@ -52,10 +102,19 @@ export function usePlayer(proseRef: React.RefObject<HTMLElement>, deps: unknown[
     provider.current?.stop();
     tokens.current = wrapWords(root);
     sents.current = groupSentences(tokens.current);
+
+    const c = new Float64Array(tokens.current.length + 1);
+    for (let i = 0; i < tokens.current.length; i++)
+      c[i + 1] = c[i] + tokenWeight(tokens.current[i].text) * 0.0135;
+    cum.current = c;
+
+    // Cached clips are keyed by sentence index, which now means something else.
+    cache.current.clear();
+    resetQueues();
     patch({
       ready: tokens.current.length > 0,
       playing: false, paused: false,
-      sentence: 0, spoken: -1,
+      sentence: 0, spoken: -1, buffering: null,
       sentences: sents.current.length
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -98,25 +157,75 @@ export function usePlayer(proseRef: React.RefObject<HTMLElement>, deps: unknown[
     };
   }, []);
 
-  const runCues = (cues: { i: number; start: number }[]) => {
+  /* Sentences advance when the AUDIO reaches them, not when they were queued.
+     Deliberately NOT on requestAnimationFrame: rAF is paused outright in a hidden tab,
+     and listening with the tab in the background is the whole point of this app. If
+     this froze there, pausing from another tab would resume from a stale sentence and
+     replay audio the reader had already heard. Called from the rAF loop and from the
+     buffering poll, whichever runs. */
+  const drainSentences = useCallback(() => {
+    const p = provider.current;
+    if (!p) return;
+    const t = p.now();
+    while (sentHead.current < sentQ.current.length && sentQ.current[sentHead.current].at <= t) {
+      const m = sentQ.current[sentHead.current++];
+      patch({ sentence: m.sent, status: p.kind });
+    }
+  }, []);
+
+  /* The highlight, on the other hand, belongs on rAF — there is nothing to highlight
+     when the page isn't being painted, and it catches up in one tick on return. */
+  const startCueLoop = useCallback((run: number) => {
     cancelAnimationFrame(raf.current);
-    const t0 = performance.now();
-    let k = 0;
     const tick = () => {
-      const el = (performance.now() - t0) / 1000;
-      while (k < cues.length && el >= cues[k].start) { mark(cues[k].i); k++; }
-      if (k < cues.length) raf.current = requestAnimationFrame(tick);
+      if (run !== abort.current) return;
+      const p = provider.current;
+      if (!p) return;
+      drainSentences();
+      // Estimates wait a beat in case this engine turns out to emit real boundaries.
+      // The hold gates CONSUMPTION, not the push — a delayed push would land after the
+      // next clip's cues and break the queue's sort order.
+      if (boundaries.current || performance.now() >= holdUntil.current) {
+        const t = p.now();
+        while (cueHead.current < cueQ.current.length && cueQ.current[cueHead.current].at <= t)
+          mark(cueQ.current[cueHead.current++].i);
+      }
+      raf.current = requestAnimationFrame(tick);
     };
     raf.current = requestAnimationFrame(tick);
-  };
+  }, [mark, drainSentences]);
 
   /* ---- transport ---- */
   const stop = useCallback(() => {
     abort.current++;
     cancelAnimationFrame(raf.current);
     provider.current?.stop();
+    resetQueues();
     document.querySelectorAll('.w.is-spoken').forEach(e => e.classList.remove('is-spoken'));
-    patch({ playing: false, paused: false });
+    patch({ playing: false, paused: false, buffering: null });
+  }, []);
+
+  /** Synthesised audio for sentence n, from cache when we already have it. */
+  const clipFor = useCallback((n: number): Promise<Clip> => {
+    let c = cache.current.get(n);
+    if (!c) {
+      const p = provider.current!;
+      const sent = sents.current[n];
+      c = p
+        .prepare(sentenceText(tokens.current, sent), sentenceTokens(tokens.current, sent), sent[0])
+        .then(clip => {
+          // A request abandoned by stop() resolves to silence. Keeping that in the cache
+          // would mean this sentence stayed silent for the rest of the chapter.
+          if (clip.cancelled) cache.current.delete(n);
+          return clip;
+        });
+      cache.current.set(n, c);
+      // ponytail: insertion-order eviction, not true LRU. Swap it if heavy scrubbing
+      // turns out to thrash the oldest entries.
+      if (cache.current.size > CACHE_MAX)
+        cache.current.delete(cache.current.keys().next().value!);
+    }
+    return c;
   }, []);
 
   const playFrom = useCallback(async (index: number) => {
@@ -126,56 +235,114 @@ export function usePlayer(proseRef: React.RefObject<HTMLElement>, deps: unknown[
     const run = abort.current;
     cancelAnimationFrame(raf.current);
     p.stop();
-    patch({ playing: true, paused: false, sentence: index, status: p.kind === 'kokoro' ? 'synthesizing…' : '' });
+    resetQueues();
+    patch({ playing: true, paused: false, sentence: index, status: p.kind === 'kokoro' ? 'buffering…' : '' });
 
-    let i = index;
-    const build = (n: number) => {
-      const sent = sents.current[n];
-      return p.prepare(sentenceText(tokens.current, sent), sentenceTokens(tokens.current, sent), sent[0]);
+    // A suspended AudioContext has currentTime frozen at 0, so every `when` computed
+    // against it would fire at once on resume. Unsuspend before reading the clock.
+    await p.ready();
+    if (run !== abort.current) return;
+
+    const total = sents.current.length;
+    const fail = (): void => {
+      patch({ status: 'voice failed — falling back', buffering: null });
+      provider.current = new SystemVoice();
+      cache.current.clear();
+      void playFrom(index);
     };
 
-    let next = build(i);
-    while (i < sents.current.length) {
-      let start: Awaited<ReturnType<typeof build>>;
-      try { start = await next; }
-      catch { patch({ status: 'voice failed — falling back' }); provider.current = new SystemVoice(); return playFrom(i); }
+    /* Pre-roll: bank a reserve before the first word rather than starting on a single
+       sentence and hoping synthesis keeps up. Only Kokoro needs it — Web Speech resolves
+       instantly and queues internally. */
+    const preloaded: Clip[] = [];
+    if (p.kind === 'kokoro') {
+      let banked = 0;
+      for (let n = index; n < total && banked < PREROLL; n++) {
+        let clip: Clip;
+        try { clip = await clipFor(n); } catch { return fail(); }
+        if (run !== abort.current) return;
+        preloaded.push(clip);
+        banked += clip.duration;
+        patch({ buffering: Math.min(1, banked / PREROLL) });
+      }
+    }
+    patch({ buffering: null });
+    if (run !== abort.current) return;
+
+    startCueLoop(run);
+    holdUntil.current = performance.now() + 250;
+    const ahead = LOOKAHEAD[p.kind];
+
+    let last: SpeakHandle | null = null;
+    for (let i = index; i < total; i++) {
+      let clip: Clip;
+      try { clip = preloaded[i - index] ?? (await clipFor(i)); } catch { return fail(); }
       if (run !== abort.current) return;
 
-      patch({ sentence: i, status: p.kind });
-      if (i + 1 < sents.current.length) next = build(i + 1);   // one-ahead pipeline
+      const when = nextStart(cursor.current, p.now(), LEAD);
+      const h = clip.start(when);
+      cursor.current = when + h.duration;
+      last = h;
 
-      const handle = start() as any;
+      sentQ.current.push({ sent: i, at: when });
 
-      /* Boundary events, where the engine emits them, are ground truth — the estimator
-         is only a stand-in. Running both makes the highlight jump backwards when a
-         boundary lands on a word the estimate already passed. So: learn once whether
-         this engine emits boundaries, then never estimate again on it. Until we know,
-         hold the estimates back briefly and drop them if a boundary beats them. */
-      if ('onBoundary' in handle) {
-        handle.onBoundary = (idx: number) => {
-          if (!boundaries.current) {
-            boundaries.current = true;
-            clearTimeout(estimateTimer.current);
-            cancelAnimationFrame(raf.current);
-          }
+      if ('onBoundary' in h && h.onBoundary !== undefined) {
+        h.onBoundary = (idx: number) => {
+          if (run !== abort.current) return;
+          // Real boundaries are ground truth. Once we know this engine emits them,
+          // drop every estimate we were holding and never estimate again.
+          if (!boundaries.current) { boundaries.current = true; cueQ.current.length = 0; cueHead.current = 0; }
           mark(idx);
         };
-        if (boundaries.current) {
-          // known good — no estimates at all
-        } else {
-          clearTimeout(estimateTimer.current);
-          estimateTimer.current = window.setTimeout(() => runCues(handle.cues), 250);
-        }
+        h.onStart = () => {
+          // Web Speech has no clock of its own, so `when` was a guess. Re-anchor the
+          // unconsumed queue by however far the guess missed — this restores the
+          // per-sentence resync that pre-scheduling would otherwise accumulate away.
+          if (run !== abort.current) return;
+          const drift = p.now() - when;
+          if (Math.abs(drift) < 0.02) return;
+          for (let k = cueHead.current; k < cueQ.current.length; k++) cueQ.current[k].at += drift;
+          for (let k = sentHead.current; k < sentQ.current.length; k++) sentQ.current[k].at += drift;
+          cursor.current += drift;
+        };
+        if (!boundaries.current) pushCues(h.cues, when);
       } else {
-        runCues(handle.cues);   // Kokoro: exact duration, no boundaries, no race
+        pushCues(h.cues, when);   // Kokoro: exact duration, no boundaries, no race
       }
-      await handle.ended;
+
+      // Wait until the play head is within `ahead` seconds of the end of what's queued,
+      // then synthesise the next one. This is the whole buffering behaviour.
+      await until(cursor.current - ahead, run);
       if (run !== abort.current) return;
-      i++;
     }
+
+    await last?.ended;
+    if (run !== abort.current) return;
     patch({ playing: false, spoken: -1 });
     document.querySelectorAll('.w.is-spoken').forEach(e => e.classList.remove('is-spoken'));
-  }, [mark]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mark, clipFor, startCueLoop]);
+
+  /** Absolute cue times, so one loop can hold several sentences at once. */
+  const pushCues = (cues: { i: number; start: number }[], when: number) => {
+    for (const c of cues) cueQ.current.push({ i: c.i, at: when + c.start });
+  };
+
+  /** Sleep until the provider clock reaches `t`. Polls rather than sleeping the whole
+   *  way so a pause — which freezes AudioContext.currentTime — can't over-buffer, and
+   *  so an abort is noticed promptly. */
+  const until = (t: number, run: number) =>
+    new Promise<void>(resolve => {
+      const step = () => {
+        const p = provider.current;
+        if (!p || run !== abort.current) return resolve();
+        drainSentences();          // timers survive a hidden tab; rAF does not
+        const d = t - p.now();
+        if (d <= 0) return resolve();
+        setTimeout(step, Math.min(d * 1000, 250));
+      };
+      step();
+    });
 
   const toggle = useCallback(() => {
     const p = provider.current;
@@ -218,26 +385,29 @@ export function usePlayer(proseRef: React.RefObject<HTMLElement>, deps: unknown[
 
   /** Spoken-time estimates, so the UI can show 3:42 / 12:10 like a media player. */
   const timing = useCallback(() => {
-    const toks = tokens.current;
-    if (!toks.length) return { elapsed: 0, total: 0 };
+    const c = cum.current;
+    if (c.length < 2) return { elapsed: 0, total: 0 };
     const upto = sents.current[s.sentence]?.[0] ?? 0;
-    let elapsed = 0, total = 0;
-    for (let i = 0; i < toks.length; i++) {
-      const w = tokenWeight(toks[i].text) * 0.0135;
-      total += w;
-      if (i < upto) elapsed += w;
-    }
     const rate = provider.current?.rate || 1;
-    return { elapsed: elapsed / rate, total: total / rate };
+    return { elapsed: c[Math.min(upto, c.length - 1)] / rate, total: c[c.length - 1] / rate };
   }, [s.sentence]);
 
+  /* Rate is applied at playback, so cached audio stays valid — but everything already
+     scheduled assumed the old rate, so the current sentence restarts. The cache makes
+     that instant. */
   const setRate = useCallback((r: number) => {
-    if (provider.current) provider.current.rate = r;
-  }, []);
+    if (!provider.current) return;
+    provider.current.rate = r;
+    if (live.current.playing) void playFrom(live.current.sentence);
+  }, [playFrom]);
 
+  /* A different voice invalidates every synthesised clip. */
   const setVoice = useCallback((id: string) => {
-    if (provider.current) provider.current.voiceId = id;
-  }, []);
+    if (!provider.current) return;
+    provider.current.voiceId = id;
+    cache.current.clear();
+    if (live.current.playing) void playFrom(live.current.sentence);
+  }, [playFrom]);
 
   /* The weights are already in the HTTP/service-worker cache after a first download,
      so a return visit can load them without a progress bar. Remember that we got
@@ -251,6 +421,7 @@ export function usePlayer(proseRef: React.RefObject<HTMLElement>, deps: unknown[
         if (cancelled) return;
         k.rate = provider.current?.rate ?? 1;
         provider.current = k;
+        cache.current.clear();
         setVoiceIds(k.listVoices());
         patch({ kind: 'kokoro', status: 'kokoro ready' });
       } catch { /* stay on the system voice */ }
@@ -266,6 +437,7 @@ export function usePlayer(proseRef: React.RefObject<HTMLElement>, deps: unknown[
       const wasPlaying = s.playing;
       stop();
       provider.current = k;
+      cache.current.clear();
       setVoiceIds(k.listVoices());
       localStorage.setItem('nr:kokoro', '1');
       patch({ kind: 'kokoro', loadPct: null, status: 'kokoro ready' });

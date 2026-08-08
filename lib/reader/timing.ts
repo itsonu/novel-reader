@@ -42,3 +42,19 @@ export function schedule(tokens: string[], offset: number, duration: number): Cu
 /** Guess a duration when none is known (Web Speech without boundary events). */
 export const estimateDuration = (tokens: string[], rate = 1) =>
   (tokens.reduce((s, t) => s + weight(t), 0) * 0.0135) / rate;
+
+/**
+ * When the next clip should start, in provider-clock seconds.
+ *
+ * `cursor` is where the queued audio currently ends. While synthesis keeps up, the next
+ * clip is placed exactly there and the two buffers join sample-accurately — that join is
+ * the whole reason narration sounds continuous. If synthesis has fallen behind, `cursor`
+ * is already in the past and there is nothing to join to, so start a hair from now
+ * instead: `lead` keeps it off a `when` that has already gone, which would otherwise
+ * play immediately and overlap whatever is still sounding.
+ *
+ * The epsilon stops a cursor a few microseconds ahead of the clock — the tail of a clip
+ * that is effectively over — from being treated as a real join.
+ */
+export const nextStart = (cursor: number, now: number, lead = 0.08) =>
+  cursor > now + 0.005 ? cursor : now + lead;

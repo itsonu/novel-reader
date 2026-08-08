@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { wrapWords, groupSentences, sentenceText, sentenceTokens, type Token, type Sentence } from './tokenize';
 import { KokoroVoice, SystemVoice, type VoiceProvider } from './providers';
+import { weight as tokenWeight } from './timing';
 
 export type PlayerState = {
   ready: boolean;
@@ -31,6 +32,14 @@ export function usePlayer(proseRef: React.RefObject<HTMLElement>, deps: unknown[
     spoken: -1, sentence: 0, sentences: 0, loadPct: null, loadFile: '', status: ''
   });
   const patch = (p: Partial<PlayerState>) => set(x => ({ ...x, ...p }));
+
+  /* Mirror of state for event handlers.
+     Transport used to read state inside a set() updater and call playFrom() from
+     there — an impure reducer. React can run an updater more than once, so the
+     first tap fired playFrom twice and the toggle needed two or three presses to
+     land. Handlers read this ref instead; setState stays pure. */
+  const live = useRef(s);
+  live.current = s;
 
   /* Tokenise once per chapter, before paint.
      Keyed on the rendered HTML — that's what determines the DOM we're wrapping.
@@ -171,24 +180,24 @@ export function usePlayer(proseRef: React.RefObject<HTMLElement>, deps: unknown[
   const toggle = useCallback(() => {
     const p = provider.current;
     if (!p) return;
-    set(cur => {
-      if (!cur.playing) { void playFrom(cur.sentence >= sents.current.length ? 0 : cur.sentence); return cur; }
-      if (cur.paused) { p.resume(); return { ...cur, paused: false }; }
-      p.pause();
-      return { ...cur, paused: true };
-    });
+    const cur = live.current;
+    if (!cur.playing) {
+      void playFrom(cur.sentence >= sents.current.length ? 0 : cur.sentence);
+      return;
+    }
+    if (cur.paused) { p.resume(); patch({ paused: false }); }
+    else { p.pause(); patch({ paused: true }); }
   }, [playFrom]);
 
   const jump = useCallback((dir: 1 | -1) => {
-    set(cur => {
-      const here = tokens.current[sents.current[cur.sentence]?.[0]]?.block;
-      let i = cur.sentence;
-      while (i >= 0 && i < sents.current.length && tokens.current[sents.current[i][0]].block === here) i += dir;
-      i = Math.max(0, Math.min(sents.current.length - 1, i));
-      if (cur.playing) void playFrom(i);
-      else mark(sents.current[i][0]);
-      return { ...cur, sentence: i };
-    });
+    const cur = live.current;
+    const here = tokens.current[sents.current[cur.sentence]?.[0]]?.block;
+    let i = cur.sentence;
+    while (i >= 0 && i < sents.current.length && tokens.current[sents.current[i][0]].block === here) i += dir;
+    i = Math.max(0, Math.min(sents.current.length - 1, i));
+    patch({ sentence: i });
+    if (cur.playing) void playFrom(i);
+    else mark(sents.current[i][0]);
   }, [playFrom, mark]);
 
   /** Click any word to start reading from its sentence. */
@@ -197,12 +206,56 @@ export function usePlayer(proseRef: React.RefObject<HTMLElement>, deps: unknown[
     if (i >= 0) void playFrom(i);
   }, [playFrom]);
 
+  /** Scrub: 0..1 across the chapter. Used by the progress bar. */
+  const seekToFraction = useCallback((f: number) => {
+    const n = sents.current.length;
+    if (!n) return;
+    const i = Math.max(0, Math.min(n - 1, Math.round(f * (n - 1))));
+    patch({ sentence: i });
+    if (live.current.playing) void playFrom(i);
+    else mark(sents.current[i][0]);
+  }, [playFrom, mark]);
+
+  /** Spoken-time estimates, so the UI can show 3:42 / 12:10 like a media player. */
+  const timing = useCallback(() => {
+    const toks = tokens.current;
+    if (!toks.length) return { elapsed: 0, total: 0 };
+    const upto = sents.current[s.sentence]?.[0] ?? 0;
+    let elapsed = 0, total = 0;
+    for (let i = 0; i < toks.length; i++) {
+      const w = tokenWeight(toks[i].text) * 0.0135;
+      total += w;
+      if (i < upto) elapsed += w;
+    }
+    const rate = provider.current?.rate || 1;
+    return { elapsed: elapsed / rate, total: total / rate };
+  }, [s.sentence]);
+
   const setRate = useCallback((r: number) => {
     if (provider.current) provider.current.rate = r;
   }, []);
 
   const setVoice = useCallback((id: string) => {
     if (provider.current) provider.current.voiceId = id;
+  }, []);
+
+  /* The weights are already in the HTTP/service-worker cache after a first download,
+     so a return visit can load them without a progress bar. Remember that we got
+     them, and bring the good voice back automatically. */
+  useEffect(() => {
+    if (localStorage.getItem('nr:kokoro') !== '1') return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const k = await KokoroVoice.load(() => {});
+        if (cancelled) return;
+        k.rate = provider.current?.rate ?? 1;
+        provider.current = k;
+        setVoiceIds(k.listVoices());
+        patch({ kind: 'kokoro', status: 'kokoro ready' });
+      } catch { /* stay on the system voice */ }
+    })();
+    return () => { cancelled = true; };
   }, []);
 
   const upgradeVoice = useCallback(async () => {
@@ -214,6 +267,7 @@ export function usePlayer(proseRef: React.RefObject<HTMLElement>, deps: unknown[
       stop();
       provider.current = k;
       setVoiceIds(k.listVoices());
+      localStorage.setItem('nr:kokoro', '1');
       patch({ kind: 'kokoro', loadPct: null, status: 'kokoro ready' });
       if (wasPlaying) void playFrom(s.sentence);
     } catch (e: any) {
@@ -221,5 +275,8 @@ export function usePlayer(proseRef: React.RefObject<HTMLElement>, deps: unknown[
     }
   }, [s.playing, s.sentence, playFrom, stop]);
 
-  return { state: s, voiceIds, toggle, stop, jump, seekToToken, setRate, setVoice, upgradeVoice };
+  return {
+    state: s, voiceIds, toggle, stop, jump, seekToToken, seekToFraction, timing,
+    setRate, setVoice, upgradeVoice
+  };
 }

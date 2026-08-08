@@ -49,26 +49,32 @@ export default function Sheet({
     anim.current = requestAnimationFrame(step);
   }, []);
 
-  /* open / close */
-  useEffect(() => {
-    if (!panel.current) return;
-    if (open) {
-      const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
-      drag.current.y = reduce ? 0 : height();
-      setY(drag.current.y);
-      requestAnimationFrame(() => (reduce ? setY(0) : springTo(0)));
-      const esc = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
-      window.addEventListener('keydown', esc);
-      const prev = document.body.style.overflow;
-      document.body.style.overflow = 'hidden';
-      return () => { window.removeEventListener('keydown', esc); document.body.style.overflow = prev; };
-    }
-  }, [open, onClose, springTo]);
+  /* Open/close animation keys on `open` ALONE.
+     It used to depend on onClose, whose identity changes every parent render — so
+     picking any option re-ran this effect, which reset the panel to off-screen and
+     re-animated it. The option had in fact been applied; the sheet just slid back
+     over it, which read as "nothing happens". */
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
 
+  useEffect(() => {
+    if (!open || !panel.current) return;
+    const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    drag.current.y = reduce ? 0 : height();
+    setY(drag.current.y);
+    requestAnimationFrame(() => (reduce ? setY(0) : springTo(0)));
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && closeRef.current();
+    window.addEventListener('keydown', esc);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { window.removeEventListener('keydown', esc); document.body.style.overflow = prev; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  // Drag lives on the grip/header only. Capturing the pointer on the whole panel
+  // retargets subsequent events to it and swallows the click on every row inside —
+  // which is exactly how the options stopped responding.
   const onPointerDown = (e: React.PointerEvent) => {
-    // don't hijack a scroll inside the list
-    const list = (e.target as HTMLElement).closest('[data-sheet-scroll]');
-    if (list && list.scrollTop > 0) return;
     cancelAnimationFrame(anim.current);
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     drag.current = {
@@ -105,19 +111,20 @@ export default function Sheet({
   return (
     <div className="root" role="dialog" aria-modal="true" aria-label={title}>
       <div ref={scrim} className="scrim" onClick={onClose} />
-      <div
-        ref={panel}
-        className="panel chrome"
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onPointerCancel={onPointerUp}
-      >
-        <div className="grip" aria-hidden />
-        <header>
-          <h2 className="title">{title}</h2>
-          <button className="btn" data-variant="ghost" onClick={onClose}>Done</button>
-        </header>
+      <div ref={panel} className="panel chrome">
+        <div
+          className="dragzone"
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onPointerCancel={onPointerUp}
+        >
+          <div className="grip" aria-hidden />
+          <header>
+            <h2 className="title">{title}</h2>
+            <button className="btn" data-variant="ghost" onClick={onClose}>Done</button>
+          </header>
+        </div>
         <div className="body" data-sheet-scroll>{children}</div>
       </div>
 
@@ -125,23 +132,37 @@ export default function Sheet({
         .root { position: fixed; inset: 0; z-index: 90; }
         .scrim { position: absolute; inset: 0; background: #000; opacity: 0; }
         .panel {
-          /* centred without transform — transform is owned by the drag */
           position: absolute; left: 0; right: 0; bottom: 0;
           width: min(34rem, 100%); margin-inline: auto;
           transform: translate3d(0, 100%, 0);
           border-radius: 1.25rem 1.25rem 0 0;
           max-height: min(78vh, 40rem); display: flex; flex-direction: column;
-          touch-action: none; will-change: transform;
+          will-change: transform;
           box-shadow: 0 -1px 0 color-mix(in oklab, var(--ink) 12%, transparent),
                       0 -30px 60px -20px #000a;
         }
+        /* Desktop: a popover anchored bottom-right above the control bar, the way a
+           media player puts its settings — not a modal drawer across the whole screen. */
+        @media (min-width: 48rem) {
+          .panel {
+            left: auto; right: 1rem; bottom: 5.25rem;
+            width: min(23rem, calc(100vw - 2rem)); margin-inline: 0;
+            border-radius: 1rem; max-height: min(70vh, 32rem);
+            box-shadow: 0 1px 0 color-mix(in oklab, var(--ink) 10%, transparent) inset,
+                        0 24px 60px -12px #000c;
+          }
+          .scrim { background: transparent; }
+          .grip { display: none; }
+        }
+        .dragzone { touch-action: none; cursor: grab; flex: none; }
+        .dragzone:active { cursor: grabbing; }
         .grip {
           width: 2.25rem; height: 0.25rem; border-radius: 999px; margin: 0.6rem auto 0;
           background: color-mix(in oklab, var(--ink) 26%, transparent);
         }
         header {
           display: flex; align-items: center; justify-content: space-between;
-          padding: 0.55rem 1rem 0.7rem;
+          padding: 0.7rem 1rem 0.55rem;
         }
         header h2 { margin: 0; }
         .body {

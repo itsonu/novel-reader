@@ -95,6 +95,12 @@ export function chapterMeta(file: string, text: string): ChapterMeta {
   };
 }
 
+/** Drop the leading H1 — the chapter header already shows the title, and printing it
+ *  twice is the most common way a markdown reader looks amateur. */
+export function bodyWithoutTitle(body: string): string {
+  return body.replace(/^\s*#\s+.*\r?\n+/, '');
+}
+
 export function sortChapters<T extends { file: string; order: number | null }>(list: T[]): T[] {
   return [...list].sort((a, b) => {
     if (a.order != null && b.order != null && a.order !== b.order) return a.order - b.order;

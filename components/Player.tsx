@@ -1,7 +1,7 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Companion, { type Mood } from './Companion';
-import VoicePicker from './VoicePicker';
+import SettingsSheet from './SettingsSheet';
 import type { PlayerState } from '@/lib/reader/usePlayer';
 
 type Props = {
@@ -12,18 +12,62 @@ type Props = {
   onRate: (r: number) => void;
   onVoice: (id: string) => void;
   onUpgrade: () => void;
+  onSeek: (fraction: number) => void;
+  timing: () => { elapsed: number; total: number };
+  cinematic: boolean;
+  onCinematic: (v: boolean) => void;
 };
 
-export default function Player({ state, voiceIds, onToggle, onJump, onRate, onVoice, onUpgrade }: Props) {
+const clock = (s: number) => {
+  if (!isFinite(s) || s < 0) s = 0;
+  const m = Math.floor(s / 60);
+  const sec = Math.floor(s % 60);
+  return `${m}:${String(sec).padStart(2, '0')}`;
+};
+
+export default function Player({
+  state, voiceIds, onToggle, onJump, onRate, onVoice, onUpgrade,
+  onSeek, timing, cinematic, onCinematic
+}: Props) {
   const [rate, setRate] = useState(1);
   const [voice, setVoice] = useState('');
+  const [settings, setSettings] = useState(false);
+  const [scrub, setScrub] = useState<number | null>(null);
+  const bar = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!voice && voiceIds.length) {
-      const first = state.kind === 'kokoro' ? (voiceIds.includes('af_heart') ? 'af_heart' : voiceIds[0]) : voiceIds[0];
+      const first = state.kind === 'kokoro'
+        ? (voiceIds.includes('af_heart') ? 'af_heart' : voiceIds[0])
+        : voiceIds[0];
       setVoice(first); onVoice(first);
     }
   }, [voiceIds, voice, state.kind, onVoice]);
+
+  const progress = state.sentences > 1 ? state.sentence / (state.sentences - 1) : 0;
+  const shown = scrub ?? progress;
+  const { elapsed, total } = timing();
+
+  const fromEvent = useCallback((clientX: number) => {
+    const r = bar.current?.getBoundingClientRect();
+    if (!r) return 0;
+    return Math.max(0, Math.min(1, (clientX - r.left) / r.width));
+  }, []);
+
+  const onDown = (e: React.PointerEvent) => {
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    setScrub(fromEvent(e.clientX));
+  };
+  const onMove = (e: React.PointerEvent) => {
+    if (scrub === null) return;
+    setScrub(fromEvent(e.clientX));
+  };
+  const onUp = (e: React.PointerEvent) => {
+    if (scrub === null) return;
+    const f = fromEvent(e.clientX);
+    setScrub(null);
+    onSeek(f);
+  };
 
   const mood: Mood =
     state.loadPct != null ? 'thinking'
@@ -31,77 +75,172 @@ export default function Player({ state, voiceIds, onToggle, onJump, onRate, onVo
       : state.playing ? 'speaking'
       : state.spoken >= 0 ? 'done' : 'idle';
 
-  const pct = state.loadPct;
+  const playing = state.playing && !state.paused;
 
   return (
-    <div className="player chrome">
-      <Companion mood={mood} />
-
-      <div className="transport">
-        <button className="icon-btn" onClick={() => onJump(-1)} aria-label="Previous paragraph">↑</button>
-        <button
-          className="icon-btn" data-size="lg" onClick={onToggle}
-          aria-label={state.playing && !state.paused ? 'Pause' : 'Play'}
-          disabled={!state.ready}
+    <>
+      <div className="player chrome">
+        {/* scrubber — the element that makes this read as a media player */}
+        <div
+          ref={bar}
+          className="scrub"
+          role="slider"
+          aria-label="Chapter position"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(shown * 100)}
+          tabIndex={0}
+          onPointerDown={onDown}
+          onPointerMove={onMove}
+          onPointerUp={onUp}
+          onPointerCancel={onUp}
+          onKeyDown={e => {
+            if (e.key === 'ArrowRight') onSeek(Math.min(1, progress + 0.02));
+            if (e.key === 'ArrowLeft') onSeek(Math.max(0, progress - 0.02));
+          }}
         >
-          {state.playing && !state.paused ? '❚❚' : '▶'}
-        </button>
-        <button className="icon-btn" onClick={() => onJump(1)} aria-label="Next paragraph">↓</button>
+          <div className="track">
+            <div className="fill" style={{ transform: `scaleX(${shown})` }} />
+            <div className="knob" style={{ left: `${shown * 100}%` }} />
+          </div>
+        </div>
+
+        <div className="row">
+          <button
+            className="ctl primary"
+            onClick={onToggle}
+            disabled={!state.ready}
+            aria-label={playing ? 'Pause' : 'Play'}
+          >
+            {playing
+              ? <svg viewBox="0 0 24 24" width="20" height="20"><rect x="6.5" y="5" width="4" height="14" rx="1.2" fill="currentColor" /><rect x="13.5" y="5" width="4" height="14" rx="1.2" fill="currentColor" /></svg>
+              : <svg viewBox="0 0 24 24" width="20" height="20"><path d="M7 4.8v14.4L19.5 12z" fill="currentColor" /></svg>}
+          </button>
+
+          <button className="ctl" onClick={() => onJump(-1)} aria-label="Previous paragraph">
+            <svg viewBox="0 0 24 24" width="18" height="18"><path d="M12 5v14M6 12l6-6 6 6" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+          </button>
+          <button className="ctl" onClick={() => onJump(1)} aria-label="Next paragraph">
+            <svg viewBox="0 0 24 24" width="18" height="18"><path d="M12 19V5M6 12l6 6 6-6" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+          </button>
+
+          <span className="time mono caption">
+            {clock(elapsed)} <span className="sep">/</span> {clock(total)}
+          </span>
+
+          <span className="grow" />
+
+          {state.kind === 'system' && (
+            <button
+              className="ctl upgrade"
+              onClick={onUpgrade}
+              disabled={state.loadPct != null}
+              aria-label="Download better voices"
+            >
+              {state.loadPct != null
+                ? <span className="pct mono">{Math.round(state.loadPct * 100)}%</span>
+                : <svg viewBox="0 0 24 24" width="18" height="18"><path d="M12 4v10m0 0l-3.5-3.5M12 14l3.5-3.5M5 18h14" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+            </button>
+          )}
+
+          <button
+            className={cinematic ? 'ctl on' : 'ctl'}
+            onClick={() => onCinematic(!cinematic)}
+            aria-pressed={cinematic}
+            aria-label="Cinematic effects"
+          >
+            <svg viewBox="0 0 24 24" width="18" height="18"><path d="M12 3l2.1 5.3L19.5 9l-4 3.6 1.1 5.4L12 15.4 7.4 18l1.1-5.4-4-3.6 5.4-.7z" fill={cinematic ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" /></svg>
+          </button>
+
+          <button className="ctl" onClick={() => setSettings(true)} aria-label="Settings" aria-haspopup="dialog">
+            <svg viewBox="0 0 24 24" width="18" height="18">
+              <circle cx="12" cy="12" r="3.1" fill="none" stroke="currentColor" strokeWidth="1.6" />
+              <path d="M12 2.8v2.4M12 18.8v2.4M21.2 12h-2.4M5.2 12H2.8M18.5 5.5l-1.7 1.7M7.2 16.8l-1.7 1.7M18.5 18.5l-1.7-1.7M7.2 7.2L5.5 5.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+            </svg>
+          </button>
+
+          <span className="face"><Companion mood={mood} /></span>
+        </div>
       </div>
 
-      <label className="field">
-        <span className="caption">Speed</span>
-        <input
-          type="range" min={0.6} max={1.8} step={0.05} value={rate}
-          onChange={e => { const r = +e.target.value; setRate(r); onRate(r); }}
-          aria-label="Playback speed"
-        />
-        <span className="caption mono">{rate.toFixed(2).replace(/0$/, '')}×</span>
-      </label>
-
-      <VoicePicker
+      <SettingsSheet
+        open={settings}
+        onClose={() => setSettings(false)}
         kind={state.kind}
         voiceIds={voiceIds}
-        value={voice}
-        onChange={id => { setVoice(id); onVoice(id); }}
+        voice={voice}
+        onVoice={id => { setVoice(id); onVoice(id); }}
+        rate={rate}
+        onRate={r => { setRate(r); onRate(r); }}
+        cinematic={cinematic}
+        onCinematic={onCinematic}
+        canUpgrade={state.kind === 'system'}
+        upgrading={state.loadPct}
+        onUpgrade={onUpgrade}
       />
-
-      {state.kind === 'system' && (
-        <button className="btn" data-variant="primary" onClick={onUpgrade} disabled={pct != null}>
-          {pct != null ? `${Math.round((pct ?? 0) * 100)}%` : 'Better voices'}
-        </button>
-      )}
-
-      {pct != null && (
-        <div className="loader" role="status">
-          <div className="track"><div className="fill" style={{ width: `${Math.round(pct * 100)}%` }} /></div>
-          <span className="caption">{state.loadFile || 'voice model'} · one-time download</span>
-        </div>
-      )}
 
       <style jsx>{`
         .player {
           position: fixed; inset: auto 0 0 0; z-index: 40;
-          display: flex; align-items: center; gap: 1rem;
-          padding: 0.6rem max(1rem, env(safe-area-inset-left)) calc(0.6rem + env(safe-area-inset-bottom));
+          padding: 0 0 env(safe-area-inset-bottom);
         }
-        .transport { display: flex; align-items: center; gap: 0.4rem; }
-        .field { display: flex; align-items: center; gap: 0.45rem; min-width: 0; }
-        .grow { flex: 1; max-width: 22rem; }
-        .field :global(input[type='range']) { width: 6rem; accent-color: var(--accent); }
-        .field :global(select) {
-          flex: 1; min-width: 0; background: transparent; color: var(--ink);
-          border: 1px solid var(--rule); border-radius: 0.55rem;
-          padding: 0.35rem 0.5rem; font: inherit; font-size: 0.82rem;
+        /* scrubber */
+        .scrub { padding: 0.55rem 0.9rem 0.2rem; cursor: pointer; touch-action: none; }
+        .track { position: relative; height: 3px; border-radius: 2px; background: color-mix(in oklab, var(--ink) 18%, transparent); }
+        .fill {
+          position: absolute; inset: 0; transform-origin: left center;
+          background: var(--accent); border-radius: 2px;
         }
-        .loader { position: absolute; inset: auto 1rem calc(100% + 0.6rem) auto; width: 17rem; }
-        .track { height: 3px; background: var(--rule); border-radius: 2px; overflow: hidden; }
-        .fill { height: 100%; background: var(--accent); transition: width 200ms ease-out; }
-        @media (max-width: 760px) {
-          .field:not(.grow) { display: none; }
-          .player { gap: 0.6rem; padding-inline: 0.75rem; }
+        .knob {
+          position: absolute; top: 50%; width: 11px; height: 11px; border-radius: 999px;
+          background: var(--accent); transform: translate(-50%, -50%) scale(0);
+          transition: transform 140ms cubic-bezier(0.32, 0.72, 0, 1);
+        }
+        .scrub:hover .knob, .scrub:focus-visible .knob { transform: translate(-50%, -50%) scale(1); }
+        .scrub:hover .track, .scrub:focus-visible .track { height: 5px; }
+        .track { transition: height 140ms cubic-bezier(0.32, 0.72, 0, 1); }
+        .scrub:focus-visible { outline: none; }
+        .scrub:focus-visible .track { box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent) 45%, transparent); }
+
+        /* control row */
+        .row {
+          display: flex; align-items: center; gap: 0.15rem;
+          padding: 0.15rem 0.55rem 0.5rem;
+        }
+        .ctl {
+          display: grid; place-items: center; width: 2.4rem; height: 2.4rem;
+          background: transparent; border: 0; border-radius: 999px;
+          color: var(--ink); cursor: pointer;
+          transition: background-color var(--quick), transform var(--quick), color var(--quick);
+        }
+        .ctl:hover { background: color-mix(in oklab, var(--ink) 9%, transparent); }
+        .ctl:active { transform: scale(0.9); }
+        .ctl:disabled { opacity: 0.4; cursor: default; }
+        .ctl.primary { width: 2.8rem; height: 2.8rem; }
+        .ctl.on { color: var(--accent); }
+        .ctl.upgrade { color: var(--accent); }
+        .pct { font-size: 0.7rem; }
+        .time { margin-inline: 0.5rem 0; white-space: nowrap; }
+        .sep { opacity: 0.5; }
+        .grow { flex: 1; }
+        .face { margin-inline-start: 0.3rem; display: grid; place-items: center; }
+
+        /* Phones: the transport keeps its touch targets, the readout goes. Nothing
+           below 44px, nothing that needs a hover to be discoverable. */
+        @media (max-width: 40rem) {
+          .scrub { padding: 0.6rem 0.6rem 0.15rem; }
+          .track { height: 4px; }
+          .knob { transform: translate(-50%, -50%) scale(1); }   /* no hover on touch */
+          .row { gap: 0; padding: 0.1rem 0.35rem 0.45rem; }
+          .ctl { width: 2.75rem; height: 2.75rem; }
+          .ctl.primary { width: 3rem; height: 3rem; }
+          .time { display: none; }
+          .face { display: none; }
+        }
+        @media (max-width: 22rem) {
+          .ctl:nth-of-type(3) { display: none; }   /* drop next-paragraph on tiny screens */
         }
       `}</style>
-    </div>
+    </>
   );
 }

@@ -1,7 +1,7 @@
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { publicClient, cloudEnabled, type Novel, type Chapter } from '@/lib/supabase';
-import { md } from '@/lib/reader/markdown';
+import { md, bodyWithoutTitle } from '@/lib/reader/markdown';
 import { chapterMetadata, chapterJsonLd } from '@/lib/seo';
 import JsonLd from '@/components/JsonLd';
 import { EMPTY_SLUG } from '@/lib/mode';
@@ -70,7 +70,7 @@ export default async function ChapterPage({ params }: Params) {
       </nav>
 
       <Reader
-        html={md(ch.body)}
+        html={md(bodyWithoutTitle(ch.body))}
         title={ch.title}
         subtitle={`${novel.title}${novel.author ? ` · ${novel.author}` : ''} · ${ch.word_count.toLocaleString()} words`}
         chapterKey={`${novel.slug}/${ch.slug}`}

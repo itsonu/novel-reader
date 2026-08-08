@@ -1,7 +1,7 @@
 'use client';
 // Local mode: same reader, same voices, zero account, files never leave the device.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { chapterMeta, sortChapters, isSkippable, md, slugify, type ChapterMeta } from '@/lib/reader/markdown';
+import { chapterMeta, sortChapters, isSkippable, md, slugify, bodyWithoutTitle, type ChapterMeta } from '@/lib/reader/markdown';
 import Reader from '@/components/Reader';
 import { putHandle, getHandle, putNovel, listNovels, persist, type StoredNovel } from '@/lib/library';
 
@@ -181,7 +181,7 @@ export default function LocalLibrary() {
       <main>
         <button className="icon-btn menu chrome" onClick={() => setNav(v => !v)} aria-label="Chapters">☰</button>
         <Reader
-          html={md(ch.body)}
+          html={md(bodyWithoutTitle(ch.body))}
           title={ch.title}
           subtitle={`${label} · ${ch.words.toLocaleString()} words`}
           chapterKey={ch.file}
@@ -189,7 +189,14 @@ export default function LocalLibrary() {
       </main>
 
       <style jsx>{`
-        .shell { display: grid; grid-template-columns: 17rem 1fr; min-height: 100dvh; }
+        /* Sidebar is anchored to the viewport edge — centring the whole shell floated
+           it off the left and read as broken. The reading column does the centring,
+           inside main, which is what the eye actually wants aligned. */
+        .shell {
+          display: grid; grid-template-columns: 16rem minmax(0, 1fr);
+          min-height: 100dvh;
+        }
+        @media (min-width: 100rem) { .shell { grid-template-columns: 18rem minmax(0, 1fr); } }
         aside {
           position: sticky; top: 0; height: 100dvh; overflow-y: auto;
           border-inline-end: 1px solid var(--rule);

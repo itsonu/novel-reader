@@ -35,13 +35,33 @@ export default function Player({
   const [scrub, setScrub] = useState<number | null>(null);
   const bar = useRef<HTMLDivElement>(null);
 
+  /* Restore speed on mount. Voice is restored below, once the engine has published
+     its list — a saved id is only usable if that engine actually offers it. */
   useEffect(() => {
-    if (!voice && voiceIds.length) {
-      const first = state.kind === 'kokoro'
-        ? (voiceIds.includes('af_heart') ? 'af_heart' : voiceIds[0])
-        : voiceIds[0];
-      setVoice(first); onVoice(first);
-    }
+    const r = parseFloat(localStorage.getItem('nr:rate') ?? '');
+    if (r && r !== 1) { setRate(r); onRate(r); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const setRatePersist = (r: number) => {
+    setRate(r); onRate(r);
+    localStorage.setItem('nr:rate', String(r));
+  };
+  const setVoicePersist = (id: string) => {
+    setVoice(id); onVoice(id);
+    // keyed per engine: a Kokoro id means nothing to the system voice list
+    localStorage.setItem(`nr:voice:${state.kind}`, id);
+  };
+
+  useEffect(() => {
+    if (voice && voiceIds.includes(voice)) return;
+    if (!voiceIds.length) return;
+    const saved = localStorage.getItem(`nr:voice:${state.kind}`);
+    const pick =
+      (saved && voiceIds.includes(saved) && saved) ||
+      (state.kind === 'kokoro' && voiceIds.includes('af_heart') && 'af_heart') ||
+      voiceIds[0];
+    setVoice(pick); onVoice(pick);
   }, [voiceIds, voice, state.kind, onVoice]);
 
   const progress = state.sentences > 1 ? state.sentence / (state.sentences - 1) : 0;
@@ -169,9 +189,9 @@ export default function Player({
         kind={state.kind}
         voiceIds={voiceIds}
         voice={voice}
-        onVoice={id => { setVoice(id); onVoice(id); }}
+        onVoice={setVoicePersist}
         rate={rate}
-        onRate={r => { setRate(r); onRate(r); }}
+        onRate={setRatePersist}
         cinematic={cinematic}
         onCinematic={onCinematic}
         canUpgrade={state.kind === 'system'}

@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Companion, { type Mood } from './Companion';
 import SettingsSheet from './SettingsSheet';
+import { unlock } from '@/lib/fx/audio';
 import type { PlayerState } from '@/lib/reader/usePlayer';
 
 type Props = {
@@ -16,6 +17,8 @@ type Props = {
   timing: () => { elapsed: number; total: number };
   cinematic: boolean;
   onCinematic: (v: boolean) => void;
+  sfx: number;
+  onSfx: (v: number) => void;
 };
 
 const clock = (s: number) => {
@@ -27,7 +30,7 @@ const clock = (s: number) => {
 
 export default function Player({
   state, voiceIds, onToggle, onJump, onRate, onVoice, onUpgrade,
-  onSeek, timing, cinematic, onCinematic
+  onSeek, timing, cinematic, onCinematic, sfx, onSfx
 }: Props) {
   const [rate, setRate] = useState(1);
   const [voice, setVoice] = useState('');
@@ -128,7 +131,7 @@ export default function Player({
         <div className="row">
           <button
             className="ctl primary"
-            onClick={onToggle}
+            onClick={() => { unlock(); onToggle(); }}
             disabled={!state.ready}
             aria-label={playing ? 'Pause' : 'Play'}
           >
@@ -194,6 +197,8 @@ export default function Player({
         onRate={setRatePersist}
         cinematic={cinematic}
         onCinematic={onCinematic}
+        sfx={sfx}
+        onSfx={onSfx}
         canUpgrade={state.kind === 'system'}
         upgrading={state.loadPct}
         onUpgrade={onUpgrade}

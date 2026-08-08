@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useImperativeHandle, useRef, useState, forwardRef } from 'react';
 import { compile, degrade, type FxCommand } from '@/lib/fx/engine';
+import { play as playSfx, setVolume } from '@/lib/fx/audio';
 import type { FxEvent } from '@/lib/fx/lexicon';
 
 export type FxHandle = { fire: (e: FxEvent) => void; clear: () => void };
@@ -10,11 +11,14 @@ export type FxHandle = { fire: (e: FxEvent) => void; clear: () => void };
  * Nothing here is in the text's layout path, so an effect can never reflow prose
  * mid-sentence — the single worst thing a reading app could do.
  */
-const FxLayer = forwardRef<FxHandle, { enabled: boolean }>(function FxLayer({ enabled }, ref) {
+const FxLayer = forwardRef<FxHandle, { enabled: boolean; volume?: number }>(
+  function FxLayer({ enabled, volume = 0.7 }, ref) {
   const root = useRef<HTMLDivElement>(null);
   const [cmd, setCmd] = useState<FxCommand | null>(null);
   const timer = useRef<number>(0);
   const reduce = useRef(false);
+
+  useEffect(() => { setVolume(volume); }, [volume]);
 
   useEffect(() => {
     const mq = matchMedia('(prefers-reduced-motion: reduce)');
@@ -30,6 +34,8 @@ const FxLayer = forwardRef<FxHandle, { enabled: boolean }>(function FxLayer({ en
       const c = degrade(compile(e), reduce.current);
       clearTimeout(timer.current);
       setCmd(c);
+      // sound rides the same event; reduced motion silences motion, not audio
+      if (volume > 0) playSfx(e.kind, e.intensity);
       // the shake lives on <html> so the whole page moves, text included
       if (c.tier === 'camera' || c.tier === 'screen') {
         document.documentElement.style.setProperty('--fx-shake', c.vars['--fx-shake']);

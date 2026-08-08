@@ -12,6 +12,7 @@ export default function Reader({
   const fx = useRef<FxHandle>(null);
   const events = useRef<Map<number, FxEvent>>(new Map());
   const [cinematic, setCinematic] = useState(false);
+  const [sfx, setSfx] = useState(0.7);
   const [size, setSize] = useState(1.19);
   // keyed on html — that is what determines the DOM the tokeniser walks
   const player = usePlayer(ref, [html]);
@@ -28,6 +29,8 @@ export default function Reader({
     const t = localStorage.getItem('nr:theme');
     if (t) document.documentElement.dataset.theme = t;
     setCinematic(localStorage.getItem('nr:fx') === '1');
+    const v = parseFloat(localStorage.getItem('nr:sfx') ?? '');
+    if (!Number.isNaN(v)) setSfx(v);
   }, []);
 
   /* Detect events once per chapter, off the rendered tokens. Thinned so the page
@@ -122,7 +125,7 @@ export default function Reader({
         dangerouslySetInnerHTML={htmlProp}
       />
 
-      <FxLayer ref={fx} enabled={cinematic} />
+      <FxLayer ref={fx} enabled={cinematic} volume={sfx} />
 
       <Player
         state={player.state}
@@ -140,6 +143,8 @@ export default function Reader({
           localStorage.setItem('nr:fx', v ? '1' : '0');
           if (!v) fx.current?.clear();
         }}
+        sfx={sfx}
+        onSfx={v => { setSfx(v); localStorage.setItem('nr:sfx', String(v)); }}
       />
 
       <style jsx>{`

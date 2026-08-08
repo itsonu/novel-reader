@@ -11,6 +11,7 @@ type Props = {
   voiceIds: string[]; voice: string; onVoice: (id: string) => void;
   rate: number; onRate: (r: number) => void;
   cinematic: boolean; onCinematic: (v: boolean) => void;
+  sfx: number; onSfx: (v: number) => void;
   canUpgrade: boolean; upgrading: number | null; onUpgrade: () => void;
 };
 
@@ -84,6 +85,23 @@ export default function SettingsSheet(p: Props) {
               <span className={p.cinematic ? 'toggle on' : 'toggle'} aria-hidden><i /></span>
             </button>
           </li>
+          {p.cinematic && (
+            <li>
+              <div className="row static">
+                <span className="label">
+                  Effect volume
+                  <span className="hint caption">
+                    {p.sfx === 0 ? 'muted' : 'thunder, impacts, rain — synthesised, no download'}
+                  </span>
+                </span>
+                <input
+                  type="range" min={0} max={1} step={0.05} value={p.sfx}
+                  onChange={e => p.onSfx(parseFloat(e.target.value))}
+                  aria-label="Effect volume"
+                />
+              </div>
+            </li>
+          )}
           <li>
             <button
               className="row"
@@ -157,6 +175,9 @@ export default function SettingsSheet(p: Props) {
         .row:hover { background: color-mix(in oklab, var(--ink) 7%, transparent); }
         .row:active { transform: scale(0.985); }
         .row:disabled { opacity: 0.5; cursor: default; }
+        .row.static { cursor: default; }
+        .row.static:hover { background: transparent; }
+        .row :global(input[type='range']) { width: 7rem; accent-color: var(--accent); flex: none; }
         .label { flex: 1; display: grid; gap: 0.12rem; font-size: 0.94rem; }
         .hint { font-size: 0.74rem; }
         .value {

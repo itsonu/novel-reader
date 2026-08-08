@@ -10,7 +10,8 @@
     "build:pages": "cross-env STATIC=1 NEXT_PUBLIC_STATIC=1 BASE_PATH=/novel-reader NEXT_PUBLIC_BASE_PATH=/novel-reader NEXT_PUBLIC_SITE_URL=https://itsonu.github.io/novel-reader next build && node scripts/finish-static.mjs",
     "deploy": "npm run build:pages && node scripts/deploy-pages.mjs",
     "preview:static": "npm run build:static && npx serve out",
-    "lint": "next lint"
+    "lint": "next lint",
+    "check": "node scripts/check-library.mjs && node scripts/check-chapters.mjs && node scripts/check-sync.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",

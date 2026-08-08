@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { SITE } from '@/lib/seo';
+import Nav from '@/components/Nav';
 import PWA from '@/components/PWA';
 import './globals.css';
 
@@ -31,7 +32,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" data-theme="dark" suppressHydrationWarning>
       <body>
-        {children}
+        <a href="#main" className="skip">Skip to content</a>
+        {/* One navigation for the whole app. It removes itself on reading routes. */}
+        <Nav />
+        <div id="main">{children}</div>
         <PWA />
       </body>
     </html>

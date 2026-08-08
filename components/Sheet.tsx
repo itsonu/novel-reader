@@ -129,17 +129,17 @@ export default function Sheet({
       </div>
 
       <style jsx>{`
-        .root { position: fixed; inset: 0; z-index: 90; }
+        .root { position: fixed; inset: 0; z-index: var(--z-sheet); }
         .scrim { position: absolute; inset: 0; background: #000; opacity: 0; }
         .panel {
           position: absolute; left: 0; right: 0; bottom: 0;
           width: min(34rem, 100%); margin-inline: auto;
           transform: translate3d(0, 100%, 0);
-          border-radius: 1.25rem 1.25rem 0 0;
+          border-radius: var(--r-sheet) var(--r-sheet) 0 0;
           max-height: min(78vh, 40rem); display: flex; flex-direction: column;
           will-change: transform;
           box-shadow: 0 -1px 0 color-mix(in oklab, var(--ink) 12%, transparent),
-                      0 -30px 60px -20px #000a;
+                      var(--e-4);
         }
         /* Desktop: a popover anchored bottom-right above the control bar, the way a
            media player puts its settings — not a modal drawer across the whole screen. */

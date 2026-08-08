@@ -5,7 +5,9 @@ import { md, bodyWithoutTitle } from '@/lib/reader/markdown';
 import { chapterMetadata, chapterJsonLd } from '@/lib/seo';
 import JsonLd from '@/components/JsonLd';
 import { EMPTY_SLUG } from '@/lib/mode';
+import { remoteId } from '@/lib/routes';
 import Reader from '@/components/Reader';
+import ChapterTracker from '@/components/ChapterTracker';
 
 type Params = { params: Promise<{ slug: string; chapter: string }> };
 
@@ -64,9 +66,25 @@ export default async function ChapterPage({ params }: Params) {
         }}
       />
 
-      <nav className="crumb chrome">
+      <nav className="crumb chrome" aria-label="Breadcrumb">
         <Link href={`/n/${novel.slug}`} className="btn" data-variant="ghost">← {novel.title}</Link>
+        <span className="grow" />
         <span className="caption mono">{index + 1} / {total}</span>
+        {/* Records where they are and offers a bookmark — the same component the local
+            reader mounts, so both kinds of novel land on the same library shelf. */}
+        <ChapterTracker
+          novelId={remoteId(novel.slug)}
+          novelTitle={novel.title}
+          author={novel.author ?? undefined}
+          chapters={total}
+          chapterSlug={ch.slug}
+          chapterTitle={ch.title}
+          chapterIndex={index}
+          href={`/n/${novel.slug}/${ch.slug}`}
+          scrollKey={`${novel.slug}/${ch.slug}`}
+          remote
+          saved={{ slug: novel.slug, cover: novel.cover_url ?? undefined }}
+        />
       </nav>
 
       <Reader

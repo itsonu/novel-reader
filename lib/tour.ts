@@ -49,10 +49,10 @@ export async function runTour(force = false) {
       }
     },
     {
-      element: '.libbtn',
+      element: '[data-tour="library"]',
       popover: {
         title: 'Your library',
-        description: 'Add your own folder of markdown chapters, or edit what’s here. Everything stays on your device.'
+        description: 'The chapter list, and the way back to this book and to everything else you’ve added. Nothing leaves your device.'
       }
     }
   ].filter(s => document.querySelector(s.element));

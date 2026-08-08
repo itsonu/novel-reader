@@ -5,6 +5,8 @@ import { publishNovel, type UploadFile } from '@/lib/publish';
 import { isSkippable, chapterMeta, sortChapters, slugify } from '@/lib/reader/markdown';
 import { can } from '@/lib/mode';
 import { putNovel, persist } from '@/lib/library';
+import { localNovelHref } from '@/lib/routes';
+import Link from 'next/link';
 
 export default function Publish() {
   const [files, setFiles] = useState<UploadFile[]>([]);
@@ -43,7 +45,9 @@ export default function Publish() {
           }))
         });
         await persist();
-        router.push('/read?library=1');
+        // Lands on the book itself, not a query flag nothing reads. (It used to push
+        // `/read?library=1`, which no screen ever looked at.)
+        router.push(localNovelHref(id));
         return;
       }
       const r = await publishNovel({ title, author, isPublic, files });
@@ -53,10 +57,15 @@ export default function Publish() {
 
   return (
     <main className="wrap narrow">
-      <h1 className="display">Publish a novel</h1>
+      <nav className="backline" aria-label="Breadcrumb">
+        <Link href="/library" className="btn" data-variant="ghost">← Library</Link>
+      </nav>
+
+      <h1 className="display">{can.cloudPublishing ? 'Publish a novel' : 'Add a novel'}</h1>
       <p className="lede">
         Drop a folder of markdown chapters. Titles, order, excerpts, word counts, share
         cards and search metadata are all derived from the files — you don&apos;t fill in a form.
+        {!can.cloudPublishing && ' It goes straight into your own library on this device.'}
       </p>
 
       <div
@@ -89,10 +98,14 @@ export default function Publish() {
               <span className="caption">Author</span>
               <input value={author} onChange={e => setAuthor(e.target.value)} placeholder="Optional" />
             </label>
-            <label className="row">
-              <input type="checkbox" checked={isPublic} onChange={e => setPublic(e.target.checked)} />
-              <span className="body">Public — indexable, shareable, readable by anyone</span>
-            </label>
+            {/* Only a server can make a novel public; without one the checkbox would be
+                a control that does nothing. */}
+            {can.cloudPublishing && (
+              <label className="row">
+                <input type="checkbox" checked={isPublic} onChange={e => setPublic(e.target.checked)} />
+                <span className="body">Public — indexable, shareable, readable by anyone</span>
+              </label>
+            )}
           </div>
 
           <ol className="preview">
@@ -101,7 +114,9 @@ export default function Publish() {
           </ol>
 
           <button className="btn" data-variant="primary" onClick={submit} disabled={pending}>
-            {pending ? 'Publishing…' : `Publish ${files.length} chapters`}
+            {pending
+              ? (can.cloudPublishing ? 'Publishing…' : 'Adding…')
+              : `${can.cloudPublishing ? 'Publish' : 'Add'} ${files.length} chapters`}
           </button>
         </>
       )}
@@ -123,7 +138,7 @@ export default function Publish() {
           padding: 0.55rem 0.7rem; color: var(--ink); font: inherit;
         }
         .preview { list-style: none; padding: 0; margin: 0 0 1.5rem; display: grid; gap: 0.2rem; color: var(--ink-faint); }
-        .err { color: #e0725f; margin-top: 1rem; }
+        .err { color: var(--err); margin-top: 1rem; }
       `}</style>
     </main>
   );

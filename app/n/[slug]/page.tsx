@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { publicClient, cloudEnabled, type Novel, type Chapter } from '@/lib/supabase';
 import { novelMetadata, bookJsonLd } from '@/lib/seo';
 import JsonLd from '@/components/JsonLd';
+import PublishedActions from '@/components/PublishedActions';
 import { EMPTY_SLUG } from '@/lib/mode';
 
 type Params = { params: Promise<{ slug: string }> };
@@ -41,6 +42,20 @@ export default async function NovelPage({ params }: Params) {
   return (
     <main className="wrap">
       <JsonLd data={bookJsonLd(novel, chapters)} />
+      <JsonLd
+        data={{
+          '@context': 'https://schema.org',
+          '@type': 'BreadcrumbList',
+          itemListElement: [
+            { '@type': 'ListItem', position: 1, name: 'Novels', item: '/' },
+            { '@type': 'ListItem', position: 2, name: novel.title }
+          ]
+        }}
+      />
+
+      <nav className="backline" aria-label="Breadcrumb">
+        <Link href="/" className="btn" data-variant="ghost">← All novels</Link>
+      </nav>
 
       <header className="hero">
         {novel.cover_url && <img src={novel.cover_url} alt="" className="cover" />}
@@ -55,11 +70,15 @@ export default async function NovelPage({ params }: Params) {
           <div className="tags">
             {novel.tags.map(t => <span key={t} className="tag caption">{t}</span>)}
           </div>
-          {chapters[0] && (
-            <Link href={`/n/${novel.slug}/${chapters[0].slug}`} className="btn" data-variant="primary">
-              Start reading
-            </Link>
-          )}
+          <PublishedActions
+            slug={novel.slug}
+            title={novel.title}
+            author={novel.author ?? undefined}
+            cover={novel.cover_url ?? undefined}
+            chapters={chapters.length}
+            words={words}
+            firstChapter={chapters[0]?.slug}
+          />
         </div>
       </header>
 

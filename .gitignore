@@ -1,0 +1,16 @@
+node_modules/
+.next/
+out/
+build/
+
+# env — never commit keys
+.env
+.env.*
+!.env.example
+
+.DS_Store
+*.log
+npm-debug.log*
+.vercel
+next-env.d.ts
+tsconfig.tsbuildinfo

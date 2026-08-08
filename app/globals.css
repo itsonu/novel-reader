@@ -157,6 +157,39 @@ body {
 
 ::selection { background: var(--mark); }
 
+/* ---------- first-run tour (driver.js, themed to match) ----------
+   Imported here rather than in the lazy chunk: a CSS side-effect import inside a
+   dynamic import has no types and ships the styles late enough to flash. */
+@import 'driver.js/dist/driver.css';
+
+.driver-popover.nr-tour {
+  background: var(--paper); color: var(--ink);
+  border: 1px solid var(--rule); border-radius: 0.9rem;
+  box-shadow: 0 24px 60px -14px #000c;
+  font-family: var(--ui); max-width: 20rem;
+}
+.driver-popover.nr-tour .driver-popover-title {
+  font-family: var(--serif); font-size: 1.02rem; font-weight: 600; letter-spacing: -0.01em;
+}
+.driver-popover.nr-tour .driver-popover-description {
+  color: var(--ink-dim); font-size: 0.86rem; line-height: 1.5;
+}
+.driver-popover.nr-tour .driver-popover-progress-text { color: var(--ink-faint); font-size: 0.72rem; }
+.driver-popover.nr-tour button {
+  background: transparent; color: var(--ink); border: 1px solid var(--rule);
+  border-radius: 0.5rem; padding: 0.3rem 0.65rem; font: inherit; font-size: 0.8rem;
+  text-shadow: none;
+}
+.driver-popover.nr-tour button:hover { border-color: var(--accent); color: var(--accent); }
+.driver-popover.nr-tour .driver-popover-next-btn {
+  background: var(--accent); border-color: transparent;
+  color: color-mix(in oklab, #000 82%, var(--accent)); font-weight: 560;
+}
+.driver-popover.nr-tour .driver-popover-arrow-side-top { border-top-color: var(--paper); }
+.driver-popover.nr-tour .driver-popover-arrow-side-bottom { border-bottom-color: var(--paper); }
+.driver-popover.nr-tour .driver-popover-arrow-side-left { border-left-color: var(--paper); }
+.driver-popover.nr-tour .driver-popover-arrow-side-right { border-right-color: var(--paper); }
+
 /* ---------- cinematic layer ----------
    Two composited planes over the page. Never in the text's layout path, so an
    effect cannot reflow prose mid-sentence. Tiers above 'screen' (shaders, particles)

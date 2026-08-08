@@ -3,9 +3,25 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { chapterMeta, sortChapters, isSkippable, md, slugify, bodyWithoutTitle, type ChapterMeta } from '@/lib/reader/markdown';
 import Reader from '@/components/Reader';
-import { putHandle, getHandle, putNovel, listNovels, persist, type StoredNovel } from '@/lib/library';
+import LibrarySheet from '@/components/LibrarySheet';
+import {
+  putHandle, getHandle, putNovel, listNovels, persist,
+  type StoredNovel, type StoredChapter
+} from '@/lib/library';
+import { SAMPLE_NOVEL, SAMPLE_ID } from '@/lib/sample-novel';
+import { runTour, tourSeen } from '@/lib/tour';
 
 type Item = ChapterMeta & { file: string };
+
+/** A stored novel becomes reader items without touching disk again. */
+const toItems = (n: StoredNovel): Item[] =>
+  n.chapters
+    .slice()
+    .sort((a, b) => a.ordinal - b.ordinal)
+    .map(c => ({
+      file: c.slug, title: c.title, order: c.ordinal,
+      body: c.body, excerpt: '', words: c.words
+    }));
 
 async function fromHandle(dir: any): Promise<Item[]> {
   const files: { file: string; handle: any }[] = [];
@@ -25,6 +41,8 @@ export default function LocalLibrary() {
   const [label, setLabel] = useState('');
   const [nav, setNav] = useState(false);
   const [err, setErr] = useState('');
+  const [lib, setLib] = useState(false);
+  const [novelId, setNovelId] = useState<string | undefined>();
   const input = useRef<HTMLInputElement>(null);
 
   /** Load into the reader AND keep a copy, so the next visit needs no folder at all. */
@@ -34,6 +52,7 @@ export default function LocalLibrary() {
     setErr(''); setItems(sorted); setLabel(name); setI(0);
     if (!remember) return;
     try {
+      setNovelId(slugify(name) || 'library');
       await putNovel({
         id: slugify(name) || 'library',
         title: name,
@@ -48,21 +67,30 @@ export default function LocalLibrary() {
   }, []);
 
   /* On return: prefer the saved copy (works offline, no permission prompt).
-     Fall back to re-reading the folder if the handle permission survived. */
+     First ever visit gets the bundled sample story, so there's something to read
+     before anyone owns a folder of markdown — and something for the tour to point at. */
   useEffect(() => {
     (async () => {
       try {
-        const saved = await listNovels();
+        let saved = await listNovels();
+        if (!saved.length && localStorage.getItem('nr:sample') !== 'removed') {
+          await putNovel({
+            id: SAMPLE_NOVEL.id,
+            title: SAMPLE_NOVEL.title,
+            author: SAMPLE_NOVEL.author,
+            addedAt: Date.now(),
+            chapters: SAMPLE_NOVEL.chapters.map(c => ({
+              ...c,
+              words: c.body.trim().split(/\s+/).filter(Boolean).length
+            }))
+          });
+          saved = await listNovels();
+        }
         if (saved.length) {
-          const n: StoredNovel = saved.sort((a, b) => b.addedAt - a.addedAt)[0];
-          void load(
-            n.chapters.map(c => ({
-              file: c.slug, title: c.title, order: c.ordinal,
-              body: c.body, excerpt: '', words: c.words
-            })),
-            n.title,
-            false
-          );
+          const n = saved.sort((a, b) => b.addedAt - a.addedAt)[0];
+          setNovelId(n.id);
+          void load(toItems(n), n.title, false);
+          if (!tourSeen()) setTimeout(() => void runTour(), 1200);
           return;
         }
       } catch { /* fall through to the folder handle */ }
@@ -161,7 +189,7 @@ export default function LocalLibrary() {
       <aside className={nav ? 'open' : ''}>
         <div className="lib">
           <p className="caption">{label}</p>
-          <button className="btn" data-variant="ghost" onClick={pick}>Change</button>
+          <button className="btn libbtn" data-variant="ghost" onClick={() => setLib(true)}>Library</button>
         </div>
         <ol>
           {items.map((c, k) => (
@@ -177,6 +205,18 @@ export default function LocalLibrary() {
           ))}
         </ol>
       </aside>
+
+      <LibrarySheet
+        open={lib}
+        onClose={() => setLib(false)}
+        activeId={novelId}
+        onOpenNovel={n => { setNovelId(n.id); void load(toItems(n), n.title, false); }}
+        onPickFolder={pick}
+        onReplaceChapters={(chapters: StoredChapter[]) => {
+          // editing the novel you're reading updates the page under you
+          void load(toItems({ id: novelId!, title: label, addedAt: 0, chapters }), label, false);
+        }}
+      />
 
       <main>
         <button className="icon-btn menu chrome" onClick={() => setNav(v => !v)} aria-label="Chapters">☰</button>

@@ -23,10 +23,25 @@ Two modes, one reader:
 
 The split is declared in `lib/mode.ts` (`can.*`) — one place, checked by the UI.
 
-### GitHub Pages
+### GitHub Pages — live at https://itsonu.github.io/novel-reader/
 
 ```bash
-npm run build:static      # -> ./out
+npm run deploy            # build with the right base path + push to gh-pages
+```
+
+Two things that silently break a Pages deploy, both handled by those scripts:
+
+- **`BASE_PATH`** — a *project* site is served from `/<repo>/`, so without it every
+  asset 404s. Set it in PowerShell, not Git Bash: bash rewrites `/novel-reader` into
+  a Windows path and the build fails with a confusing `basePath has to start with a /`.
+- **`.nojekyll`** — Pages runs Jekyll by default, which drops every `_`-prefixed folder,
+  i.e. all of `/_next`. The site loads blank. `scripts/deploy-pages.mjs` refuses to
+  publish without it.
+
+Other useful targets:
+
+```bash
+npm run build:static      # -> ./out, no base path (user/org site or another host)
 npm run preview:static    # build + serve it locally
 ```
 

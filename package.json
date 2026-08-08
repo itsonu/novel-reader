@@ -7,12 +7,15 @@
     "build": "next build",
     "start": "next start",
     "build:static": "cross-env STATIC=1 NEXT_PUBLIC_STATIC=1 next build && node scripts/finish-static.mjs",
+    "build:pages": "cross-env STATIC=1 NEXT_PUBLIC_STATIC=1 BASE_PATH=/novel-reader NEXT_PUBLIC_BASE_PATH=/novel-reader NEXT_PUBLIC_SITE_URL=https://itsonu.github.io/novel-reader next build && node scripts/finish-static.mjs",
+    "deploy": "npm run build:pages && node scripts/deploy-pages.mjs",
     "preview:static": "npm run build:static && npx serve out",
     "lint": "next lint"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",
     "@supabase/supabase-js": "^2.45.4",
+    "driver.js": "^1.8.0",
     "kokoro-js": "^1.2.1",
     "motion": "^11.11.17",
     "next": "^15.0.3",

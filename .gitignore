@@ -17,3 +17,6 @@ tsconfig.tsbuildinfo
 
 __pycache__/
 *.pyc
+
+# stray artifact from a Windows `> NUL` redirect
+NUL

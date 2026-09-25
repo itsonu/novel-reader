@@ -1,0 +1,7 @@
+User-Agent: *
+Allow: /
+Disallow: /read
+Disallow: /publish
+Disallow: /api/
+
+Sitemap: https://itsonu.github.io/novel-reader/sitemap.xml

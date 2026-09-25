@@ -8,7 +8,10 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { getProgress, getSaved, putSaved, setFavorite, type Progress } from '@/lib/library';
+import { getProgress, getSaved, listBookmarks, putSaved, setFavorite, type Progress } from '@/lib/library';
+import ChapterList, { type ChapterRow } from './ChapterList';
+import Icon from './Icon';
+import { toast } from './Toaster';
 import { publishedChapterHref, remoteId } from '@/lib/routes';
 
 export type Props = {
@@ -53,20 +56,32 @@ export default function PublishedActions(p: Props) {
   };
 
   return (
-    <div className="acts">
+    <>
       {href && (
-        <Link href={href} className="btn" data-variant="primary">
+        <Link href={href} className="btn" data-variant="primary" data-size="lg">
+          <Icon name="book" size={18} />
           {progress ? `Continue · chapter ${progress.chapterIndex + 1}` : 'Start reading'}
         </Link>
       )}
-      <button className="btn" aria-pressed={fav} onClick={toggle}>
-        {fav ? '★ In your library' : '☆ Save to library'}
+      <button className="btn" data-size="lg" aria-pressed={fav} onClick={async () => {
+        await toggle();
+        toast({ message: fav ? 'Removed from your library' : 'Saved to your library', tone: fav ? 'default' : 'ok' });
+      }}>
+        <Icon name={fav ? 'check' : 'plus'} size={17} />
+        {fav ? 'In your library' : 'Save to library'}
       </button>
-
-      <style jsx>{`
-        .acts { display: flex; gap: 0.6rem; flex-wrap: wrap; }
-        .acts :global(a) { text-decoration: none; }
-      `}</style>
-    </div>
+    </>
   );
+}
+
+/** The published book's chapter list, lit with this reader's own progress and marks. */
+export function PublishedChapters({ slug, chapters }: { slug: string; chapters: ChapterRow[] }) {
+  const id = remoteId(slug);
+  const [at, setAt] = useState(-1);
+  const [marked, setMarked] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    getProgress(id).then(p => setAt(p?.chapterIndex ?? -1)).catch(() => {});
+    listBookmarks().then(all => setMarked(new Set(all.filter(b => b.novelId === id).map(b => b.chapterSlug)))).catch(() => {});
+  }, [id]);
+  return <ChapterList chapters={chapters} current={at} marked={marked} />;
 }

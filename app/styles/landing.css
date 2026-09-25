@@ -1,0 +1,201 @@
+/* ==========================================================================
+   Landing. The home page's own furniture — scoped by class, loaded globally
+   because the page is a server component and styled-jsx isn't available there.
+   ========================================================================== */
+/* ---------- landing ---------- */
+.wordmark {
+  font-family: var(--font-serif); font-size: 1.15rem; letter-spacing: -0.015em; font-weight: 600;
+}
+.hero-eyebrow { margin-bottom: var(--s-6); }
+.navlinks { display: flex; gap: 0.5rem; }
+.navlinks a { text-decoration: none; }
+
+.hero-wrap {
+  max-width: 68rem; margin-inline: auto;
+  padding: clamp(3rem, 10vh, 7rem) 1.5rem clamp(3rem, 8vw, 6rem);
+  display: grid; gap: clamp(2rem, 5vw, 4rem); align-items: center;
+  position: relative; isolation: isolate;
+  /* clip, not hidden: the ambient pools below are inset past the edges on
+     purpose, and `hidden` here would also kill position:sticky inside. */
+  overflow-x: clip;
+}
+/* ambient depth behind the hero — two soft accent pools, drifting slowly.
+   Composited (transform only), behind everything, gone under reduced motion. */
+.hero-wrap::before {
+  content: ''; position: absolute; inset: -20% -10%; z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(38rem 24rem at 18% 22%, color-mix(in oklab, var(--accent) 7%, transparent), transparent 65%),
+    radial-gradient(30rem 22rem at 82% 68%, color-mix(in oklab, var(--accent) 5%, transparent), transparent 62%);
+  animation: hero-drift 26s ease-in-out infinite alternate;
+  /* Feather the layer itself, so the pools never meet the clip edge as a hard line. */
+  -webkit-mask-image: radial-gradient(ellipse 55% 55% at 50% 50%, #000 45%, transparent 100%);
+  mask-image: radial-gradient(ellipse 55% 55% at 50% 50%, #000 45%, transparent 100%);
+}
+@keyframes hero-drift {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to   { transform: translate3d(2%, -2.5%, 0) scale(1.06); }
+}
+@media (min-width: 62rem) {
+  .hero-wrap { grid-template-columns: 1.05fr 0.95fr; }
+}
+.hero-title {
+  font-size: var(--t-hero); font-weight: 500;
+  line-height: 0.98; letter-spacing: -0.032em; margin: 0;
+  text-wrap: balance;
+}
+.hero-title em { font-style: italic; color: var(--accent); }
+
+/* The headline is narrated, not revealed: each word rises and focuses in turn,
+   at the same cadence the player uses. --d is the per-word delay from page.tsx. */
+.hl { display: block; }
+.hw {
+  display: inline-block; margin-inline-end: 0.24em;
+  opacity: 0; transform: translate3d(0, 0.42em, 0); filter: blur(7px);
+  transition: opacity 700ms cubic-bezier(0.22, 0.61, 0.36, 1) var(--d, 0ms),
+              transform 700ms cubic-bezier(0.22, 0.61, 0.36, 1) var(--d, 0ms),
+              filter 700ms cubic-bezier(0.22, 0.61, 0.36, 1) var(--d, 0ms);
+}
+[data-shown='true'] .hw { opacity: 1; transform: none; filter: none; }
+@media (prefers-reduced-motion: reduce) {
+  .hw { opacity: 1; transform: none; filter: none; transition: none; }
+}
+
+/* section rules fade out at the edges — a breath, not a fence */
+.rail, .shelf, .closer {
+  border-top: 1px solid;
+  border-image: linear-gradient(90deg, transparent, var(--rule) 18%, var(--rule) 82%, transparent) 1;
+}
+.rail {
+  max-width: 62rem; margin-inline: auto;
+  padding: clamp(3.5rem, 10vw, 7rem) 1.5rem clamp(3rem, 8vw, 5rem);
+  scroll-margin-top: 4rem;
+}
+
+/* ---------- the passage: scrolling narrates it ----------
+   Four claims that used to be four identical cards. Set as one editorial
+   passage instead, because the product's whole argument is that reading is
+   better than a list of features. */
+.passage {
+  max-width: 66ch; margin-inline: auto;
+  font-family: var(--serif);
+  font-size: clamp(1.12rem, 0.92rem + 0.85vw, 1.44rem);
+  line-height: 1.62;                 /* inverse leading: bigger type, tighter lines */
+  letter-spacing: -0.008em;
+  font-optical-sizing: auto;
+  text-wrap: pretty;
+  hanging-punctuation: first last;
+}
+.sp { margin: 0 0 1.5em; }
+.sp:last-child { margin-bottom: 0; }
+/* asymmetry, so the block reads as a spread rather than a stack of equals */
+.sp[data-lean='right'] { margin-inline-start: clamp(0rem, 6vw, 4.5rem); }
+
+.passage .sp:first-of-type::first-letter {
+  float: inline-start;
+  font-size: 3.5em; line-height: 0.78;
+  padding-inline-end: 0.07em;
+  margin-block-start: 0.05em;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* Unread words sit at --ink-dim, not --ink-faint: this is the page's body copy,
+   and it has to clear 4.5:1 for a reader whose browser never runs the timeline. */
+/* inline-block, not inline: view() needs a real box to measure a range against.
+   On an inline box Chrome resolves progress straight to 100% and every word
+   renders already-read — the effect silently does nothing. */
+.sw { display: inline-block; color: var(--ink-dim); border-radius: 0.16em; }
+
+/* Typed, so `var(--w) * 0.34%` is real calc maths rather than a token paste.
+   Untyped it substitutes as a string and the whole animation-range is dropped. */
+@property --w {
+  syntax: '<number>';
+  inherits: false;
+  initial-value: 0;
+}
+
+/* The player's own three states, in the player's own colours.
+   Declared outside the @supports block — nesting keyframes inside one leaves
+   them at the mercy of whatever the build's CSS pipeline does with at-rules. */
+@keyframes sw-speak {
+  0%   { color: var(--ink-dim); background-color: transparent; box-shadow: none; }
+  45%  { color: var(--ink); background-color: var(--mark); box-shadow: 0 0 0 0.14em var(--mark); }
+  100% { color: var(--ink); background-color: transparent; box-shadow: none; }
+}
+
+@supports (animation-timeline: view()) {
+  .sw {
+    animation: sw-speak linear both;
+    animation-timeline: view();
+    /* Geometry gives the line-to-line cadence; --w leans the sweep left-to-right
+       inside a line. Monotonic index, so it never runs backwards mid-line. */
+    animation-range:
+      cover calc(26% + var(--w) * 0.34%)
+      cover calc(48% + var(--w) * 0.34%);
+  }
+}
+
+/* Reduced motion keeps the passage, drops the traversal: everything reads as
+   already-read. A page of half-lit text would be worse than no effect at all. */
+@media (prefers-reduced-motion: reduce) {
+  .sw { animation: none; color: var(--ink); }
+}
+
+.shelf { max-width: 62rem; margin-inline: auto; padding: clamp(2rem, 6vw, 4rem) 1.5rem; }
+.section-h { font-size: clamp(1.7rem, 3.5vw, 2.6rem); letter-spacing: -0.022em; margin: 0 0 1.75rem; }
+
+.closer {
+  text-align: center;
+  padding: clamp(4rem, 12vw, 8rem) 1.5rem clamp(5rem, 14vw, 9rem);
+  position: relative; isolation: isolate;
+}
+.closer::before {
+  content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background: radial-gradient(34rem 18rem at 50% 62%, color-mix(in oklab, var(--accent) 6%, transparent), transparent 70%);
+}
+.closer h2 { font-size: clamp(2rem, 4.5vw, 3.4rem); letter-spacing: -0.026em; margin: 0 0 1.75rem; }
+.closer a { text-decoration: none; }
+/* --ink-faint measures 2.96:1 on paper — fine for a numeral beside a label,
+   not for a sentence the visitor is meant to read. */
+.fineprint { margin-top: 1.5rem; color: var(--ink-dim); }
+
+.footer {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 1rem;
+  max-width: 68rem; margin-inline: auto;
+  padding: 1.4rem 1.5rem max(1.4rem, env(safe-area-inset-bottom));
+  border-top: 1px solid;
+  border-image: linear-gradient(90deg, transparent, var(--rule) 18%, var(--rule) 82%, transparent) 1;
+}
+.footer a { color: var(--ink-dim); text-decoration: none; transition: color var(--quick); }
+.footer a:hover { color: var(--ink); }
+.footer .navlinks { gap: 1.1rem; }
+
+/* ---- paper grain, landing only ----
+   Breaks the banding in the hero's radial pools and gives the flat dark field
+   the tooth of printed stock. Landing-scoped on purpose: over live prose it
+   would fight the spoken-word highlight. */
+.landing::after {
+  content: ''; position: fixed; inset: 0; pointer-events: none;
+  z-index: 1; opacity: 0.035; mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+@media (prefers-contrast: more) { .landing::after { display: none; } }
+
+/* ---- how far you've read ----
+   The reader's own furniture, on the page that argues for it. Scroll-driven, so
+   it tracks the scrollbar exactly rather than a listener guessing at it. */
+@supports (animation-timeline: scroll()) {
+  .landing::before {
+    content: ''; position: fixed; inset: 0 0 auto; height: 2px;
+    z-index: var(--z-nav); pointer-events: none;
+    background: linear-gradient(90deg, color-mix(in oklab, var(--accent) 55%, transparent), var(--accent));
+    transform: scaleX(0); transform-origin: 0 50%;
+    animation: read-progress linear both;
+    animation-timeline: scroll();
+  }
+  @keyframes read-progress { to { transform: scaleX(1); } }
+  @media (prefers-reduced-motion: reduce) { .landing::before { display: none; } }
+}
+
+

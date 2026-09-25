@@ -4,6 +4,7 @@ import Reveal from '@/components/Reveal';
 import SampleLine from '@/components/SampleLine';
 import SpokenProse from '@/components/SpokenProse';
 import ResumeLink from '@/components/ResumeLink';
+import Cover from '@/components/Cover';
 
 export const revalidate = 300;
 
@@ -29,6 +30,7 @@ export default async function Home() {
         {/* hero */}
         <section className="hero-wrap">
           <Reveal>
+            <p className="eyebrow hero-eyebrow">Read or listen · Free · No account</p>
             <h1 className="display hero-title">
               {HERO_LINES.map((line, li) => {
                 const before = HERO_LINES.slice(0, li).reduce((n, l) => n + l.length, 0);
@@ -53,7 +55,7 @@ export default async function Home() {
             <div className="cta">
               {/* Turns into "Continue <book>" once there's something to continue. */}
               <ResumeLink />
-              <Link href="/library" className="btn">Your library</Link>
+              <Link href="/#how" className="btn" data-size="lg">How it works</Link>
             </div>
           </Reveal>
 
@@ -73,15 +75,13 @@ export default async function Home() {
             <Reveal>
               <h2 className="section-h display">Published here</h2>
             </Reveal>
-            <ul className="grid">
+            <ul className="shelfgrid">
               {novels.map((n, i) => (
                 <li key={n.id}>
                   <Reveal delay={Math.min(i, 6) * 55}>
                     <Link href={`/n/${n.slug}`}>
-                      {n.cover_url
-                        ? <img src={n.cover_url} alt="" />
-                        : <span className="blank" aria-hidden>{n.title.slice(0, 1)}</span>}
-                      <span className="t title">{n.title}</span>
+                      <Cover title={n.title} author={n.author} src={n.cover_url} />
+                      <span className="t">{n.title}</span>
                       {n.author && <span className="caption">{n.author}</span>}
                     </Link>
                   </Reveal>
@@ -96,8 +96,8 @@ export default async function Home() {
         <section className="closer">
           <h2 className="display">Bring your own book.</h2>
           <div className="cta center">
-            <Link href="/library" className="btn" data-variant="primary">Open your library</Link>
-            <Link href="/publish" className="btn">Add a novel</Link>
+            <Link href="/library" className="btn" data-variant="primary" data-size="lg">Open your library</Link>
+            <Link href="/publish" className="btn" data-size="lg">Add a novel</Link>
           </div>
           <p className="caption fineprint">
             Files stay on your device. No account, no tracking, no upload.

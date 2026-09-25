@@ -3,8 +3,11 @@ import Link from 'next/link';
 import { publicClient, cloudEnabled, type Novel, type Chapter } from '@/lib/supabase';
 import { novelMetadata, bookJsonLd } from '@/lib/seo';
 import JsonLd from '@/components/JsonLd';
-import PublishedActions from '@/components/PublishedActions';
+import Cover from '@/components/Cover';
+import Icon from '@/components/Icon';
+import PublishedActions, { PublishedChapters } from '@/components/PublishedActions';
 import { EMPTY_SLUG } from '@/lib/mode';
+import { publishedChapterHref } from '@/lib/routes';
 
 type Params = { params: Promise<{ slug: string }> };
 
@@ -32,6 +35,11 @@ export async function generateMetadata({ params }: Params) {
   return novelMetadata(d.novel, d.chapters, d.chapters[0]?.body ?? '');
 }
 
+const hours = (w: number) => {
+  const m = Math.max(1, Math.round(w / 238));
+  return m < 60 ? `${m} min` : `${Math.floor(m / 60)} hr ${m % 60 ? `${m % 60} min` : ''}`.trim();
+};
+
 export default async function NovelPage({ params }: Params) {
   const { slug } = await params;
   const d = await load(slug);
@@ -40,7 +48,7 @@ export default async function NovelPage({ params }: Params) {
   const words = chapters.reduce((s, c) => s + c.word_count, 0);
 
   return (
-    <main className="wrap">
+    <main className="bookpage">
       <JsonLd data={bookJsonLd(novel, chapters)} />
       <JsonLd
         data={{
@@ -54,46 +62,47 @@ export default async function NovelPage({ params }: Params) {
       />
 
       <nav className="backline" aria-label="Breadcrumb">
-        <Link href="/" className="btn" data-variant="ghost">← All novels</Link>
+        <Link href="/" className="btn" data-variant="ghost" data-size="sm"><Icon name="back" size={16} /> Discover</Link>
       </nav>
 
-      <header className="hero">
-        {novel.cover_url && <img src={novel.cover_url} alt="" className="cover" />}
-        <div>
+      <header className="bookhero">
+        <Cover title={novel.title} author={novel.author} src={novel.cover_url} size="lg" />
+        <div className="info">
           <h1 className="display">{novel.title}</h1>
-          {novel.author && <p className="title byline">{novel.author}</p>}
-          <p className="caption meta mono">
-            {chapters.length} chapters · {words.toLocaleString()} words
-            {novel.is_public ? '' : ' · private'}
+          {novel.author && <p className="byline">{novel.author}</p>}
+          <p className="facts">
+            <span>{chapters.length} chapters</span>
+            <span>{words.toLocaleString()} words</span>
+            <span><Icon name="clock" size={14} />{hours(words)}</span>
+            {!novel.is_public && <span>Private</span>}
           </p>
           {novel.blurb && <p className="blurb">{novel.blurb}</p>}
-          <div className="tags">
-            {novel.tags.map(t => <span key={t} className="tag caption">{t}</span>)}
+          {novel.tags.length > 0 && (
+            <div className="tags">{novel.tags.map(t => <span key={t} className="tag">{t}</span>)}</div>
+          )}
+          <div className="actions">
+            <PublishedActions
+              slug={novel.slug}
+              title={novel.title}
+              author={novel.author ?? undefined}
+              cover={novel.cover_url ?? undefined}
+              chapters={chapters.length}
+              words={words}
+              firstChapter={chapters[0]?.slug}
+            />
           </div>
-          <PublishedActions
-            slug={novel.slug}
-            title={novel.title}
-            author={novel.author ?? undefined}
-            cover={novel.cover_url ?? undefined}
-            chapters={chapters.length}
-            words={words}
-            firstChapter={chapters[0]?.slug}
-          />
         </div>
       </header>
 
-      <ol className="toc">
-        {chapters.map((c, i) => (
-          <li key={c.id}>
-            <Link href={`/n/${novel.slug}/${c.slug}`}>
-              <span className="caption mono n">{String(i + 1).padStart(2, '0')}</span>
-              <span className="t">{c.title}</span>
-              <span className="caption mono w">{c.word_count.toLocaleString()}</span>
-            </Link>
-            {c.excerpt && <p className="caption ex">{c.excerpt}</p>}
-          </li>
-        ))}
-      </ol>
+      <section className="booksec" aria-labelledby="ch-h">
+        <div className="sechead"><h2 id="ch-h" className="title">Chapters</h2></div>
+        <PublishedChapters
+          slug={novel.slug}
+          chapters={chapters.map(c => ({
+            slug: c.slug, title: c.title, words: c.word_count, href: publishedChapterHref(novel.slug, c.slug)
+          }))}
+        />
+      </section>
     </main>
   );
 }

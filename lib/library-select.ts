@@ -74,7 +74,7 @@ export function buildCards(
       percent,
       status: statusOf(percent),
       lastReadAt: p?.at,
-      chapterLabel: p && `Chapter ${p.chapterIndex + 1} of ${p.chapters} · ${p.chapterTitle}`
+      chapterLabel: p && `Chapter ${p.chapterIndex + 1} of ${n.chapters.length} · ${p.chapterTitle}`
     };
   });
 

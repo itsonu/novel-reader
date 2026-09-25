@@ -36,6 +36,15 @@ lib/library.ts           IndexedDB: novels, progress, folder handle
 lib/mode.ts              capability flags
 lib/voices.ts            voice naming (accent + gender + timbre)
 lib/seo.ts               metadata + JSON-LD
+lib/theme.ts             light/dark/system + the pre-paint BOOT_SCRIPT (no theme flash)
+lib/reading.ts           reader prefs (size, leading, measure, face) as CSS vars
+lib/ui.ts                usePresence (exit animations), useModal (focus trap/restore)
+
+app/styles/tokens.css    every colour, size, radius, shadow, duration — both themes
+app/styles/components.css  primitives: .btn .icon-btn .seg .switch .chip .meter .input …
+components/ReaderShell   the one reading room for local AND published novels
+components/ChapterList   search / filter / grouped-by-50 chapter list (novel page + drawer)
+components/Toaster       toast() from anywhere, with Undo; survives navigation
 ```
 
 ### Non-obvious things that will bite you
@@ -53,6 +62,14 @@ lib/seo.ts               metadata + JSON-LD
   so an app update never re-downloads 80MB of weights.
 - **Kokoro loads only on user intent**, never at page load, and synthesises in a Web
   Worker (`lib/reader/tts.worker.ts`) so inference never blocks the highlight loop.
+- **styled-jsx only scopes JSX in the returned tree.** Markup built in a helper or a
+  `const` above the return gets no scoped class. Such pieces use global, prefixed CSS
+  (`.chlist …`, `.libgrid`, `.chead`) — see `components/ChapterList.tsx`.
+- **Never animate `transform` on an ancestor of a fixed overlay.** It becomes their
+  containing block (the player rides the page). `template.tsx` fades opacity only, with
+  `backwards` fill; chapter entrances animate `.page`, never the player's parent.
+- **Themes are resolved before paint** by `BOOT_SCRIPT` in `<head>`. Don't move theme or
+  reading-pref application into an effect — that reintroduces the flash.
 - **Audio is scheduled, not started.** Clips are placed on `AudioContext.currentTime` at
   the exact moment the previous one ends, and the player banks a reserve ahead of the
   play head. Anything that starts a clip with a bare `start()` reintroduces the gap.

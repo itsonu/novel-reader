@@ -1,13 +1,11 @@
 import { notFound } from 'next/navigation';
-import Link from 'next/link';
 import { publicClient, cloudEnabled, type Novel, type Chapter } from '@/lib/supabase';
 import { md, bodyWithoutTitle } from '@/lib/reader/markdown';
 import { chapterMetadata, chapterJsonLd } from '@/lib/seo';
 import JsonLd from '@/components/JsonLd';
 import { EMPTY_SLUG } from '@/lib/mode';
-import { remoteId } from '@/lib/routes';
-import Reader from '@/components/Reader';
-import ChapterTracker from '@/components/ChapterTracker';
+import { publishedChapterHref, publishedNovelHref, remoteId } from '@/lib/routes';
+import ReaderShell from '@/components/ReaderShell';
 
 type Params = { params: Promise<{ slug: string; chapter: string }> };
 
@@ -36,7 +34,7 @@ async function load(slug: string, chapterSlug: string) {
   const list = (chapters ?? []) as Chapter[];
   const i = list.findIndex(c => c.slug === chapterSlug);
   if (i < 0) return null;
-  return { novel, chapter: list[i], prev: list[i - 1], next: list[i + 1], total: list.length, index: i };
+  return { novel, chapters: list, chapter: list[i], prev: list[i - 1], next: list[i + 1], total: list.length, index: i };
 }
 
 export async function generateMetadata({ params }: Params) {
@@ -50,7 +48,7 @@ export default async function ChapterPage({ params }: Params) {
   const { slug, chapter } = await params;
   const d = await load(slug, chapter);
   if (!d) notFound();
-  const { novel, chapter: ch, prev, next, total, index } = d;
+  const { novel, chapters, chapter: ch, total, index } = d;
 
   return (
     <>
@@ -66,40 +64,33 @@ export default async function ChapterPage({ params }: Params) {
         }}
       />
 
-      <nav className="crumb chrome" aria-label="Breadcrumb">
-        <Link href={`/n/${novel.slug}`} className="btn" data-variant="ghost">← {novel.title}</Link>
-        <span className="grow" />
-        <span className="caption mono">{index + 1} / {total}</span>
-        {/* Records where they are and offers a bookmark — the same component the local
-            reader mounts, so both kinds of novel land on the same library shelf. */}
-        <ChapterTracker
-          novelId={remoteId(novel.slug)}
-          novelTitle={novel.title}
-          author={novel.author ?? undefined}
-          chapters={total}
-          chapterSlug={ch.slug}
-          chapterTitle={ch.title}
-          chapterIndex={index}
-          href={`/n/${novel.slug}/${ch.slug}`}
-          scrollKey={`${novel.slug}/${ch.slug}`}
-          remote
-          saved={{ slug: novel.slug, cover: novel.cover_url ?? undefined }}
-        />
-      </nav>
-
-      <Reader
+      {/* The prose is rendered here on the server, so every chapter is a real,
+          indexable HTML page; the shell around it hydrates for the chrome. */}
+      <ReaderShell
+        novel={{
+          id: remoteId(novel.slug), title: novel.title, author: novel.author ?? undefined,
+          href: publishedNovelHref(novel.slug), cover: novel.cover_url ?? undefined
+        }}
+        chapters={chapters.map(c => ({
+          slug: c.slug, title: c.title, words: c.word_count, href: publishedChapterHref(novel.slug, c.slug)
+        }))}
+        index={index}
         html={md(bodyWithoutTitle(ch.body))}
-        title={ch.title}
-        subtitle={`${novel.title}${novel.author ? ` · ${novel.author}` : ''} · ${ch.word_count.toLocaleString()} words`}
-        chapterKey={`${novel.slug}/${ch.slug}`}
+        words={ch.word_count}
+        tracker={{
+          novelId: remoteId(novel.slug),
+          novelTitle: novel.title,
+          author: novel.author ?? undefined,
+          chapters: total,
+          chapterSlug: ch.slug,
+          chapterTitle: ch.title,
+          chapterIndex: index,
+          href: publishedChapterHref(novel.slug, ch.slug),
+          scrollKey: `${novel.slug}/${ch.slug}`,
+          remote: true,
+          saved: { slug: novel.slug, cover: novel.cover_url ?? undefined }
+        }}
       />
-
-      <nav className="pager">
-        {prev
-          ? <Link href={`/n/${novel.slug}/${prev.slug}`} className="btn" rel="prev">← {prev.title}</Link>
-          : <span />}
-        {next && <Link href={`/n/${novel.slug}/${next.slug}`} className="btn" data-variant="primary" rel="next">{next.title} →</Link>}
-      </nav>
     </>
   );
 }

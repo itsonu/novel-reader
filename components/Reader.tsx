@@ -1,19 +1,40 @@
 'use client';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+// The chapter itself: prose, narration, cinematic layer. The chrome around it — top
+// bar, contents, reading settings — belongs to ReaderShell; this component only knows
+// how to show one chapter and read it aloud.
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { usePlayer } from '@/lib/reader/usePlayer';
 import Player from './Player';
 import FxLayer, { type FxHandle } from './FxLayer';
 import { detect, thin, type FxEvent } from '@/lib/fx/lexicon';
+import { loadReading, saveReading, SIZE_STEP } from '@/lib/reading';
+import { isTyping } from '@/lib/ui';
+
+/** Any open modal owns the keyboard; the page's shortcuts stand down. */
+const overlayOpen = () => Boolean(document.querySelector('[aria-modal="true"]'));
 
 export default function Reader({
-  html, title, subtitle, chapterKey, genre
-}: { html: string; title: string; subtitle?: string; chapterKey: string; genre?: string }) {
+  html, chapterKey, genre, before, after, direction = 0, onTap
+}: {
+  html: string;
+  chapterKey: string;
+  genre?: string;
+  /** Rendered above the prose (the chapter heading). Not tokenised, not narrated. */
+  before?: React.ReactNode;
+  /** Rendered below the prose (end-of-chapter navigation). */
+  after?: React.ReactNode;
+  /** -1 arrived from the next chapter, 1 from the previous, 0 fresh — steers the entrance. */
+  direction?: -1 | 0 | 1;
+  /** A tap on the page that isn't asking narration to do anything. */
+  onTap?: () => void;
+}) {
   const ref = useRef<HTMLElement>(null);
+  const page = useRef<HTMLDivElement>(null);
   const fx = useRef<FxHandle>(null);
   const events = useRef<Map<number, FxEvent>>(new Map());
+  const pointer = useRef<string>('mouse');
   const [cinematic, setCinematic] = useState(false);
   const [sfx, setSfx] = useState(0.7);
-  const [size, setSize] = useState(1.19);
   // keyed on html — that is what determines the DOM the tokeniser walks
   const player = usePlayer(ref, [html]);
 
@@ -24,14 +45,28 @@ export default function Reader({
 
   /* remembered prefs */
   useEffect(() => {
-    const s = parseFloat(localStorage.getItem('nr:size') ?? '');
-    if (s) { setSize(s); document.documentElement.style.setProperty('--prose', `${s}rem`); }
-    const t = localStorage.getItem('nr:theme');
-    if (t) document.documentElement.dataset.theme = t;
     setCinematic(localStorage.getItem('nr:fx') === '1');
     const v = parseFloat(localStorage.getItem('nr:sfx') ?? '');
     if (!Number.isNaN(v)) setSfx(v);
   }, []);
+
+  /* Chapter entrance. The page slides in from the side it came from — forwards from
+     the right, back from the left — so the direction of travel is felt, not read.
+     Web Animations, on the page wrapper only: the fixed player must never sit inside
+     a transformed ancestor. */
+  const first = useRef(true);
+  useLayoutEffect(() => {
+    if (first.current) { first.current = false; return; }
+    const el = page.current;
+    if (!el || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    el.animate(
+      [
+        { opacity: 0, transform: `translate3d(${direction * 28}px, ${direction ? 0 : 10}px, 0)` },
+        { opacity: 1, transform: 'none' }
+      ],
+      { duration: 360, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' }
+    );
+  }, [chapterKey, direction]);
 
   /* Detect events once per chapter, off the rendered tokens. Thinned so the page
      stays calm — the spec's 90/10 rule is enforced here, not hoped for. */
@@ -59,13 +94,6 @@ export default function Reader({
     }
   }, [player.state.spoken, cinematic]);
 
-  const bump = (d: number) => {
-    const s = Math.min(1.6, Math.max(0.95, +(size + d).toFixed(2)));
-    setSize(s);
-    document.documentElement.style.setProperty('--prose', `${s}rem`);
-    localStorage.setItem('nr:size', String(s));
-  };
-
   /* restore + persist scroll per chapter */
   useEffect(() => {
     const key = `nr:scroll:${chapterKey}`;
@@ -76,54 +104,50 @@ export default function Reader({
     return () => { save(); window.removeEventListener('scroll', save); };
   }, [chapterKey]);
 
-  /* click a word to read from there */
-  const onClick = useCallback((e: React.MouseEvent) => {
-    const el = (e.target as HTMLElement).closest('.w') as HTMLElement | null;
-    if (el?.dataset.i) player.seekToToken(+el.dataset.i);
-  }, [player]);
+  const narrating = player.state.playing || player.state.spoken >= 0;
 
-  /* keyboard */
+  /* A word click reads from there — with a mouse always, on touch only once narration
+     is running. On a phone a tap on idle text is someone asking for the controls, and
+     starting a voice at them would be a hostile answer. */
+  const onClick = useCallback((e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    if (target.closest('a, button')) return;
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed) return;   // they were selecting text, not tapping
+    const el = target.closest('.w') as HTMLElement | null;
+    const touch = pointer.current !== 'mouse';
+    if (el?.dataset.i && (!touch || narrating)) { player.seekToToken(+el.dataset.i); return; }
+    if (touch) onTap?.();
+  }, [player, narrating, onTap]);
+
+  /* keyboard: narration and text size. Chapter-level keys live in ReaderShell. */
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
-      if ((e.target as HTMLElement).matches('input,select,textarea')) return;
+      if (isTyping(e) || overlayOpen() || e.metaKey || e.ctrlKey || e.altKey) return;
+      if ((e.target as HTMLElement).closest('[role="slider"]')) return;
       if (e.key === ' ') { e.preventDefault(); player.toggle(); }
-      if (e.key === 'j') player.jump(1);
-      if (e.key === 'k') player.jump(-1);
-      if (e.key === '+' || e.key === '=') bump(0.04);
-      if (e.key === '-') bump(-0.04);
+      else if (e.key === 'j') player.jump(1);
+      else if (e.key === 'k') player.jump(-1);
+      else if (e.key === '+' || e.key === '=') { const r = loadReading(); saveReading({ ...r, size: r.size + SIZE_STEP }); }
+      else if (e.key === '-' || e.key === '_') { const r = loadReading(); saveReading({ ...r, size: r.size - SIZE_STEP }); }
     };
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
-  });
+  }, [player]);
 
   return (
-    <>
-      <div className="head">
-        <div className="titles">
-          <h1>{title}</h1>
-          {subtitle && <p className="caption sub">{subtitle}</p>}
-        </div>
-        <div className="tools">
-          <button className="icon-btn" onClick={() => bump(-0.04)} aria-label="Smaller text">A</button>
-          <button className="icon-btn" onClick={() => bump(0.04)} aria-label="Larger text">A</button>
-          <button
-            className="icon-btn"
-            onClick={() => {
-              const t = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
-              document.documentElement.dataset.theme = t;
-              localStorage.setItem('nr:theme', t);
-            }}
-            aria-label="Toggle theme"
-          >◐</button>
-        </div>
+    <div className="reader" data-narrating={narrating || undefined} data-playing={(player.state.playing && !player.state.paused) || undefined}>
+      <div ref={page} className="page">
+        {before}
+        <article
+          ref={ref}
+          className="prose"
+          onPointerDown={e => { pointer.current = e.pointerType; }}
+          onClick={onClick}
+          dangerouslySetInnerHTML={htmlProp}
+        />
+        {after}
       </div>
-
-      <article
-        ref={ref}
-        className="prose"
-        onClick={onClick}
-        dangerouslySetInnerHTML={htmlProp}
-      />
 
       <FxLayer ref={fx} enabled={cinematic} volume={sfx} />
 
@@ -148,28 +172,9 @@ export default function Reader({
       />
 
       <style jsx>{`
-        /* A chapter title is a label, not a poster. Capping it keeps the first
-           paragraph near the top of the fold instead of three lines below it. */
-        .head {
-          max-width: var(--measure); margin: 0 auto;
-          padding: clamp(1.75rem, 4vw, 3rem) 1.25rem 1.25rem;
-          display: flex; align-items: baseline; justify-content: space-between; gap: 1.5rem;
-          border-bottom: 1px solid var(--rule);
-        }
-        .titles { min-width: 0; }
-        .head h1 {
-          font-family: var(--serif);
-          font-size: clamp(1.4rem, 1.1rem + 1vw, 1.85rem);
-          line-height: 1.18; letter-spacing: -0.016em; font-weight: 600;
-          margin: 0; text-wrap: balance;
-        }
-        .sub { margin: 0.35rem 0 0; }
-        .tools { display: flex; gap: 0.3rem; flex: none; }
-        .tools :global(.icon-btn) { width: 2rem; height: 2rem; }
-        .tools :global(.icon-btn:first-child) { font-size: 0.7rem; }
-        .tools :global(.icon-btn:nth-child(2)) { font-size: 0.95rem; }
-        article { padding: 2rem 1.25rem 45vh; }
+        .page { padding-inline: var(--gutter); }
+        article { padding: 0 0 var(--s-8); }
       `}</style>
-    </>
+    </div>
   );
 }

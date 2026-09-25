@@ -11,9 +11,13 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import NovelCard from '@/components/NovelCard';
+import Cover from '@/components/Cover';
+import Icon from '@/components/Icon';
+import Menu from '@/components/Menu';
+import { toast } from '@/components/Toaster';
 import {
   deleteBookmark, ensureSeeded, listBookmarks, listNovels, listProgress,
-  listSaved, putNovel, removeFromLibrary, setFavorite, usage,
+  listSaved, onLibraryChanged, putBookmark, putNovel, removeFromLibrary, restore, setFavorite, snapshot, usage,
   type Bookmark
 } from '@/lib/library';
 import { localNovelHref } from '@/lib/routes';
@@ -25,10 +29,11 @@ import {
   importFromDrop, importFromFiles, importFromPicker, refreshAllLinked,
   supportsDirectoryPicker, type ImportResult
 } from '@/lib/import';
+import { ago } from '@/lib/ui';
 
 type Tab = 'all' | 'favorites' | 'bookmarks' | 'history';
 const TABS: { id: Tab; label: string }[] = [
-  { id: 'all', label: 'All books' },
+  { id: 'all', label: 'All' },
   { id: 'favorites', label: 'Favourites' },
   { id: 'bookmarks', label: 'Bookmarks' },
   { id: 'history', label: 'History' }
@@ -49,16 +54,7 @@ const FILTERS: { id: StatusFilter; label: string }[] = [
 ];
 
 const bytes = (n: number) => (n > 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1e3))} KB`);
-
-function ago(t: number): string {
-  const m = Math.round((Date.now() - t) / 60000);
-  if (m < 1) return 'just now';
-  if (m < 60) return `${m} min ago`;
-  const h = Math.round(m / 60);
-  if (h < 24) return `${h} hr ago`;
-  const d = Math.round(h / 24);
-  return d < 7 ? `${d} d ago` : new Date(t).toLocaleDateString();
-}
+const VIEW_KEY = 'nr:libview';
 
 function LibraryBody() {
   const router = useRouter();
@@ -72,11 +68,20 @@ function LibraryBody() {
   const [q, setQ] = useState('');
   const [status, setStatus] = useState<StatusFilter>('all');
   const [sort, setSort] = useState<Sort>('recent');
+  const [view, setView] = useState<'grid' | 'list'>('grid');
   const [busy, setBusy] = useState(false);
-  const [note, setNote] = useState('');
   const [dragging, setDragging] = useState(false);
   const [removing, setRemoving] = useState<Card | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  const search = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    try { if (localStorage.getItem(VIEW_KEY) === 'list') setView('list'); } catch { /* default */ }
+  }, []);
+  const pickView = (v: 'grid' | 'list') => {
+    setView(v);
+    try { localStorage.setItem(VIEW_KEY, v); } catch { /* per visit */ }
+  };
 
   const load = useCallback(async (): Promise<string[] | undefined> => {
     try {
@@ -104,11 +109,23 @@ function LibraryBody() {
       if (!live || !ids?.length) return;
       const changed = await refreshAllLinked(ids);
       if (!live || !changed) return;
-      setNote(`Picked up new writing in ${changed} linked ${changed === 1 ? 'folder' : 'folders'}.`);
+      toast({ message: `Picked up new writing in ${changed} linked ${changed === 1 ? 'folder' : 'folders'}.`, tone: 'ok' });
       await load();
     })();
-    return () => { live = false; };
+    const off = onLibraryChanged(() => void load());
+    return () => { live = false; off(); };
   }, [load]);
+
+  /* "/" jumps to search, the way it does on most of the web. */
+  useEffect(() => {
+    const on = (e: KeyboardEvent) => {
+      if (e.key !== '/' || (e.target as HTMLElement).matches('input, textarea, select')) return;
+      if (document.querySelector('[aria-modal="true"]')) return;
+      e.preventDefault(); search.current?.focus();
+    };
+    window.addEventListener('keydown', on);
+    return () => window.removeEventListener('keydown', on);
+  }, []);
 
   const goTab = (id: Tab) => {
     // A tab is a place, so it gets a URL and a history entry — back returns to the
@@ -118,25 +135,44 @@ function LibraryBody() {
 
   const onFavorite = async (id: string, on: boolean) => {
     setCards(cs => cs.map(c => (c.id === id ? { ...c, favorite: on } : c)));   // optimistic
-    try { await setFavorite(id, on); } catch { await load(); }
+    try {
+      await setFavorite(id, on);
+      toast({ message: on ? 'Added to favourites' : 'Removed from favourites' });
+    } catch { await load(); }
   };
 
+  /** Remove now, keep everything needed to put it back for as long as the toast lives. */
   const onRemove = async (card: Card) => {
     setRemoving(null);
     setCards(cs => cs.filter(c => c.id !== card.id));
-    try { await removeFromLibrary(card.id); } finally { await load(); }
+    try {
+      const snap = await snapshot(card.id);
+      await removeFromLibrary(card.id);
+      toast({
+        message: `Removed “${card.title}”`,
+        action: { label: 'Undo', onClick: async () => { await restore(snap); await load(); } }
+      });
+    } catch {
+      toast({ message: 'Couldn’t remove that book.', tone: 'err' });
+    } finally { await load(); }
   };
+  /* A published book costs nothing to remove — it's still published — so no dialog, just Undo. */
+  const askRemove = (card: Card) => (card.offline ? setRemoving(card) : void onRemove(card));
 
   const onDropBookmark = async (b: Bookmark) => {
     setMarks(m => m.filter(x => x.id !== b.id));
-    try { await deleteBookmark(b.id); } catch { await load(); }
+    try {
+      await deleteBookmark(b.id);
+      toast({ message: 'Bookmark removed', action: { label: 'Undo', onClick: async () => { await putBookmark(b); setMarks(m => [...m, b]); } } });
+    } catch { await load(); }
   };
 
   const settle = async (r: ImportResult | null) => {
     setBusy(false);
     if (!r) return;
-    if ('error' in r) { setNote(r.error); return; }
-    setNote(`Added “${r.novel.title}” — ${r.novel.chapters.length} chapters.`);
+    if ('error' in r) { toast({ message: r.error, tone: 'err' }); return; }
+    toast({ message: `Added “${r.novel.title}” — ${r.novel.chapters.length} chapters.`, tone: 'ok',
+      action: { label: 'Open', onClick: () => router.push(localNovelHref(r.novel.id)) } });
     await load();
   };
 
@@ -150,10 +186,10 @@ function LibraryBody() {
   const startBlank = async () => {
     const id = `untitled-${Date.now().toString(36)}`;
     try {
-      await putNovel({ id, title: 'Untitled', addedAt: Date.now(), chapters: [] });
+      await putNovel({ id, title: 'Untitled book', addedAt: Date.now(), chapters: [] });
       router.push(localNovelHref(id));
     } catch {
-      setNote('Could not create a book. This browser is blocking on-device storage.');
+      toast({ message: 'Could not create a book. This browser is blocking on-device storage.', tone: 'err' });
     }
   };
 
@@ -177,21 +213,24 @@ function LibraryBody() {
     history: cards.filter(c => c.lastReadAt != null).length
   };
 
-  /* ---- states before the shelves ---- */
   if (phase === 'loading') return <Skeleton />;
 
   if (phase === 'error')
     return (
       <div className="wrap">
-        <EmptyState title="Your library didn’t open">
-          <p className="caption">
-            This browser is blocking on-device storage — usually private browsing, or a
-            setting that clears site data. Reading still works; nothing will be remembered.
+        <div className="empty">
+          <span className="glyph"><Icon name="alert" size={26} /></span>
+          <h1 className="title">Your library didn’t open</h1>
+          <p>
+            This browser is blocking on-device storage — usually private browsing, or a setting
+            that clears site data. Reading still works; nothing will be remembered.
           </p>
-          <button className="btn" data-variant="primary" onClick={() => { setPhase('loading'); void load(); }}>
-            Try again
-          </button>
-        </EmptyState>
+          <div className="actions">
+            <button className="btn" data-variant="primary" onClick={() => { setPhase('loading'); void load(); }}>
+              <Icon name="refresh" size={16} /> Try again
+            </button>
+          </div>
+        </div>
       </div>
     );
 
@@ -199,6 +238,39 @@ function LibraryBody() {
   const clearFilters = (
     <button className="btn" onClick={() => { setQ(''); setStatus('all'); }}>Clear search and filters</button>
   );
+  const featured = tab === 'all' && !filtered ? reading[0] : undefined;
+  const addMenu = (
+    <Menu
+      label="Add books"
+      variant="primary"
+      trigger={<><Icon name="plus" size={17} /> {busy ? 'Reading folder…' : 'Add'}</>}
+      items={[
+        { label: 'Open a folder of chapters', icon: 'folder', onSelect: () => void addFolder() },
+        { label: 'Import markdown files', icon: 'file', href: '/publish' },
+        'sep',
+        { label: 'Start a blank book', icon: 'pen', onSelect: () => void startBlank() }
+      ]}
+    />
+  );
+
+  const shelf = (list: Card[]) =>
+    view === 'grid' ? (
+      <ul className="libgrid stagger">
+        {list.map((c, i) => (
+          <li key={c.id} style={{ ['--i' as string]: i }}>
+            <NovelCard card={c} onFavorite={onFavorite} onRemove={askRemove} />
+          </li>
+        ))}
+      </ul>
+    ) : (
+      <ul className="liblist stagger">
+        {list.map((c, i) => (
+          <li key={c.id} style={{ ['--i' as string]: i }}>
+            <NovelCard card={c} onFavorite={onFavorite} onRemove={askRemove} view="list" />
+          </li>
+        ))}
+      </ul>
+    );
 
   return (
     <div
@@ -208,7 +280,7 @@ function LibraryBody() {
       onDrop={onDrop}
       data-dragging={dragging || undefined}
     >
-      <header className="head">
+      <header className="pagehead">
         <div>
           <h1 className="display">Library</h1>
           <p className="caption sub">
@@ -217,12 +289,8 @@ function LibraryBody() {
               : 'Nothing here yet.'}
           </p>
         </div>
-        <div className="headtools">
-          <button className="btn" data-variant="primary" onClick={addFolder} disabled={busy}>
-            {busy ? 'Reading folder…' : 'Add a folder'}
-          </button>
-          <Link href="/publish" className="btn">Import files</Link>
-          <button className="btn" onClick={startBlank}>Start blank</button>
+        <div className="acts">
+          {addMenu}
           <input
             ref={fileInput} type="file" hidden multiple
             // @ts-expect-error non-standard, required for the Firefox/Safari path
@@ -232,84 +300,86 @@ function LibraryBody() {
         </div>
       </header>
 
-      {note && (
-        <p className="note caption" role="status">
-          {note}
-          <button className="linkish" onClick={() => setNote('')}>Dismiss</button>
-        </p>
-      )}
-
-      {/* Continue reading — the shelf that earns the trip to this page. Only drawn
-          when there is something half-finished on it. */}
-      {reading.length > 0 && (
-        <section className="rail" aria-labelledby="continue-h">
-          <h2 id="continue-h" className="title sec">Continue reading</h2>
-          <ul className="railrow">
-            {reading.slice(0, 8).map(c => (
-              <li key={c.id}>
-                <Link href={c.resumeHref} className="resume">
-                  <span className="rart" aria-hidden>
-                    {c.cover ? <img src={c.cover} alt="" /> : <span className="rblank">{c.title.slice(0, 1)}</span>}
-                  </span>
-                  <span className="rtext">
-                    <span className="rtitle">{c.title}</span>
-                    <span className="caption rch">{c.chapterLabel ?? 'Chapter 1'}</span>
-                    <span className="rbar" aria-hidden>
-                      <span style={{ width: `${Math.max(3, Math.round(c.percent * 100))}%` }} />
+      {/* Continue reading — the reason to come to this page. The latest book gets the
+          stage; the rest queue beside it. Only drawn when something is half-finished. */}
+      {featured && (
+        <section className="continue" aria-labelledby="continue-h">
+          <h2 id="continue-h" className="sr-only">Continue reading</h2>
+          <Link href={featured.resumeHref} className="feature">
+            <Cover title={featured.title} author={featured.author} src={featured.cover} size="sm" />
+            <span className="ft">
+              <span className="eyebrow">Continue reading</span>
+              <span className="ftt">{featured.title}</span>
+              <span className="caption ftc">{featured.chapterLabel ?? 'Chapter 1'}</span>
+              <span className="ftm">
+                <span className="meter" style={{ ['--p' as string]: featured.percent }} />
+                <span className="caption mono">{Math.round(featured.percent * 100)}%{featured.lastReadAt ? ` · ${ago(featured.lastReadAt)}` : ''}</span>
+              </span>
+            </span>
+            <span className="fgo btn" data-variant="primary" aria-hidden><Icon name="book" size={17} /> Resume</span>
+          </Link>
+          {reading.length > 1 && (
+            <ul className="railrow">
+              {reading.slice(1, 7).map(c => (
+                <li key={c.id}>
+                  <Link href={c.resumeHref} className="mini">
+                    <Cover title={c.title} author={c.author} src={c.cover} size="xs" />
+                    <span className="mt">
+                      <span className="mtt">{c.title}</span>
+                      <span className="meter" data-size="sm" style={{ ['--p' as string]: c.percent }} />
+                      <span className="caption mono">{Math.round(c.percent * 100)}%</span>
                     </span>
-                    <span className="caption rpct">
-                      {Math.round(c.percent * 100)}% · {c.lastReadAt ? ago(c.lastReadAt) : ''}
-                    </span>
-                  </span>
-                </Link>
-              </li>
-            ))}
-          </ul>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
       )}
 
       <div className="controls">
-        <nav className="tabs" aria-label="Library sections">
-          {TABS.map(t => (
-            <button
-              key={t.id}
-              className="tab"
-              data-active={tab === t.id || undefined}
-              aria-current={tab === t.id ? 'true' : undefined}
-              onClick={() => goTab(t.id)}
-            >
-              {t.label} <span className="n caption mono">{counts[t.id]}</span>
-            </button>
-          ))}
-        </nav>
+        <div className="row1">
+          <div className="seg tabs" role="tablist" aria-label="Library sections">
+            {TABS.map(t => (
+              <button
+                key={t.id}
+                role="tab"
+                aria-selected={tab === t.id}
+                onClick={() => goTab(t.id)}
+              >
+                {t.label}<span className="n mono">{counts[t.id]}</span>
+              </button>
+            ))}
+          </div>
+          {(tab === 'all' || tab === 'favorites') && (
+            <div className="seg views" role="radiogroup" aria-label="View">
+              <button role="radio" aria-checked={view === 'grid'} aria-label="Grid" title="Grid" onClick={() => pickView('grid')}><Icon name="grid" size={16} /></button>
+              <button role="radio" aria-checked={view === 'list'} aria-label="List" title="List" onClick={() => pickView('list')}><Icon name="rows" size={16} /></button>
+            </div>
+          )}
+        </div>
 
-        <div className="filters">
+        <div className="row2">
           <label className="search">
-            <span className="sr">Search your library</span>
-            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
-                 strokeWidth="1.7" strokeLinecap="round" aria-hidden>
-              <circle cx="11" cy="11" r="6.4" /><path d="m16 16 4 4" />
-            </svg>
+            <Icon name="search" size={16} />
+            <span className="sr-only">Search your library</span>
             <input
-              type="search" value={q} onChange={e => setQ(e.target.value)}
+              ref={search} className="input" type="search" value={q} onChange={e => setQ(e.target.value)}
               placeholder={tab === 'bookmarks' ? 'Search bookmarks' : 'Search titles and authors'}
+              aria-keyshortcuts="/"
             />
           </label>
-
           {tab !== 'bookmarks' && (
             <>
-              <label className="sel">
-                <span className="sr">Sort by</span>
-                <select value={sort} onChange={e => setSort(e.target.value as Sort)} disabled={tab === 'history'}>
+              <label>
+                <span className="sr-only">Sort by</span>
+                <select className="select" value={sort} onChange={e => setSort(e.target.value as Sort)} disabled={tab === 'history'}>
                   {SORTS.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
                 </select>
               </label>
               <div className="chips" role="group" aria-label="Filter by status">
                 {FILTERS.map(f => (
-                  <button
-                    key={f.id} className="chip" data-on={status === f.id || undefined}
-                    aria-pressed={status === f.id} onClick={() => setStatus(f.id)}
-                  >
+                  <button key={f.id} className="chip" aria-pressed={status === f.id} onClick={() => setStatus(f.id)}>
                     {f.label}
                   </button>
                 ))}
@@ -319,308 +389,226 @@ function LibraryBody() {
         </div>
       </div>
 
-      {/* The two card shelves are written out rather than shared through a helper:
-          styled-jsx scopes only the JSX in this returned tree, and a `.grid` built in a
-          function above would silently inherit the landing page's grid instead. */}
-      {tab === 'all' && (shown.length ? (
-        <ul className="grid">
-          {shown.map(c => (
-            <li key={c.id}><NovelCard card={c} onFavorite={onFavorite} onRemove={setRemoving} /></li>
-          ))}
-        </ul>
-      ) : filtered ? (
-        <EmptyState title="No books match">
-          <p className="caption">Nothing in your library fits that search and filter.</p>
-          {clearFilters}
-        </EmptyState>
-      ) : (
-        <EmptyState title="Your library is empty">
-          <p className="caption">
-            Point the reader at a folder of markdown chapters — drop it anywhere on this
-            page. Files stay on your device.
-          </p>
-          <span className="row">
-            <button className="btn" data-variant="primary" onClick={addFolder}>Choose a folder</button>
-            <Link href="/" className="btn">Browse published novels</Link>
-          </span>
-        </EmptyState>
-      ))}
-
-      {tab === 'favorites' && (starred.length ? (
-        <ul className="grid">
-          {starred.map(c => (
-            <li key={c.id}><NovelCard card={c} onFavorite={onFavorite} onRemove={setRemoving} /></li>
-          ))}
-        </ul>
-      ) : (
-        <EmptyState title="Nothing starred yet">
-          <p className="caption">Tap the star on any book and it lands here.</p>
-          <button className="btn" onClick={() => goTab('all')}>Go to all books</button>
-        </EmptyState>
-      ))}
-
-      {tab === 'bookmarks' && (
-        bookmarks.length ? (
-          <ul className="rows">
-            {bookmarks.map(b => (
-              <li key={b.id}>
-                <Link href={b.href} className="row-main">
-                  <span className="rowtop">
-                    <span className="rowt">{b.chapterTitle}</span>
-                    <span className="caption">{b.novelTitle} · {ago(b.at)}</span>
-                  </span>
-                  {b.note && <span className="quote">“{b.note}”</span>}
-                </Link>
-                <button className="rowx" aria-label={`Remove bookmark in ${b.chapterTitle}`} onClick={() => onDropBookmark(b)}>✕</button>
-              </li>
-            ))}
-          </ul>
+      <div className="shelves" role="tabpanel" aria-label={TABS.find(t => t.id === tab)?.label}>
+        {tab === 'all' && (shown.length ? shelf(shown) : filtered ? (
+          <div className="empty">
+            <span className="glyph"><Icon name="search" size={24} /></span>
+            <h2 className="title">No books match</h2>
+            <p>Nothing in your library fits that search and filter.</p>
+            <div className="actions">{clearFilters}</div>
+          </div>
         ) : (
-          <EmptyState title={q ? 'No bookmarks match' : 'No bookmarks yet'}>
-            <p className="caption">
-              {q ? 'Try a different word.' : 'While reading, the bookmark button in the top bar saves your exact spot.'}
-            </p>
-            {q ? clearFilters : <button className="btn" onClick={() => goTab('all')}>Go to all books</button>}
-          </EmptyState>
-        )
-      )}
+          <div className="empty">
+            <span className="glyph"><Icon name="library" size={26} /></span>
+            <h2 className="title">Your library is empty</h2>
+            <p>Point the reader at a folder of markdown chapters — or drop one anywhere on this page. Files stay on your device.</p>
+            <div className="actions">
+              <button className="btn" data-variant="primary" onClick={addFolder}><Icon name="folder" size={17} /> Choose a folder</button>
+              <button className="btn" onClick={startBlank}><Icon name="pen" size={17} /> Start writing</button>
+            </div>
+          </div>
+        ))}
 
-      {tab === 'history' && (
-        past.length ? (
-          <ul className="rows">
-            {past.map(c => (
-              <li key={c.id}>
-                <Link href={c.resumeHref} className="row-main">
-                  <span className="rowtop">
-                    <span className="rowt">{c.title}</span>
-                    <span className="caption">
-                      {c.lastReadAt ? ago(c.lastReadAt) : ''} · {Math.round(c.percent * 100)}%
-                      {c.status === 'finished' ? ' · finished' : ''}
+        {tab === 'favorites' && (starred.length ? shelf(starred) : (
+          <div className="empty">
+            <span className="glyph"><Icon name="star" size={24} /></span>
+            <h2 className="title">Nothing starred yet</h2>
+            <p>Star a book from its page or its ··· menu and it lands here.</p>
+            <div className="actions"><button className="btn" onClick={() => goTab('all')}>Go to all books</button></div>
+          </div>
+        ))}
+
+        {tab === 'bookmarks' && (
+          bookmarks.length ? (
+            <ul className="rows stagger">
+              {bookmarks.map((b, i) => (
+                <li key={b.id} style={{ ['--i' as string]: i }}>
+                  <Link href={b.href} className="row-main">
+                    <span className="rowtop">
+                      <span className="rowt"><Icon name="bookmark" size={14} fill className="bmi" />{b.chapterTitle}</span>
+                      <span className="caption">{b.novelTitle} · {ago(b.at)}</span>
                     </span>
-                  </span>
-                  {c.chapterLabel && <span className="quote plain">{c.chapterLabel}</span>}
-                </Link>
-                <Link href={c.detailsHref} className="btn small">Details</Link>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <EmptyState title="Nothing read yet">
-            <p className="caption">Open any book and it starts keeping your place.</p>
-            <button className="btn" onClick={() => goTab('all')}>Go to all books</button>
-          </EmptyState>
-        )
-      )}
+                    {b.note && <span className="quote">“{b.note}”</span>}
+                  </Link>
+                  <button className="icon-btn" data-size="sm" aria-label={`Remove bookmark in ${b.chapterTitle}`} onClick={() => onDropBookmark(b)}>
+                    <Icon name="close" size={15} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className="empty">
+              <span className="glyph"><Icon name="bookmark" size={24} /></span>
+              <h2 className="title">{q ? 'No bookmarks match' : 'No bookmarks yet'}</h2>
+              <p>{q ? 'Try a different word.' : 'While reading, the bookmark button in the top bar (or B) saves your exact spot.'}</p>
+              <div className="actions">{q ? clearFilters : <button className="btn" onClick={() => goTab('all')}>Go to all books</button>}</div>
+            </div>
+          )
+        )}
+
+        {tab === 'history' && (
+          past.length ? (
+            <ul className="rows stagger">
+              {past.map((c, i) => (
+                <li key={c.id} style={{ ['--i' as string]: i }}>
+                  <Link href={c.resumeHref} className="row-main hist">
+                    <Cover title={c.title} author={c.author} src={c.cover} size="xs" />
+                    <span className="ht">
+                      <span className="rowtop">
+                        <span className="rowt">{c.title}</span>
+                        <span className="caption">{c.lastReadAt ? ago(c.lastReadAt) : ''}</span>
+                      </span>
+                      <span className="caption">
+                        {c.chapterLabel}{c.status === 'finished' ? ' · Finished' : ` · ${Math.round(c.percent * 100)}%`}
+                      </span>
+                    </span>
+                  </Link>
+                  <Link href={c.detailsHref} className="btn" data-variant="ghost" data-size="sm">Details</Link>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className="empty">
+              <span className="glyph"><Icon name="clock" size={24} /></span>
+              <h2 className="title">Nothing read yet</h2>
+              <p>Open any book and it starts keeping your place.</p>
+              <div className="actions"><button className="btn" onClick={() => goTab('all')}>Go to all books</button></div>
+            </div>
+          )
+        )}
+      </div>
 
       {tab === 'all' && cards.length > 0 && (
         <p className="caption foot">
+          <Icon name="download" size={14} className="inl" />{' '}
           {cards.filter(c => c.offline).length} of {cards.length} stored on this device and readable offline
-          {space ? ` · ${bytes(space.used)} used of ${bytes(space.quota)} available` : ''}.
+          {space ? ` · ${bytes(space.used)} used` : ''}. Drop a folder anywhere to add it.
         </p>
       )}
 
       <ConfirmDialog
         open={Boolean(removing)}
         title={`Remove “${removing?.title ?? ''}”?`}
-        body={
-          removing?.offline
-            ? 'Every chapter, your place in the book and its bookmarks are deleted from this device. There is no undo.'
-            : 'It leaves your shelf along with your place in it. The novel itself stays published, so you can open it again from Discover.'
-        }
+        body="Every chapter, your place in the book and its bookmarks are deleted from this device. You’ll have a few seconds to undo."
         onDismiss={() => setRemoving(null)}
         choices={[
           { label: 'Keep it', onPick: () => setRemoving(null), variant: 'primary' },
-          { label: removing?.offline ? 'Delete from device' : 'Remove from library',
-            onPick: () => { if (removing) void onRemove(removing); }, variant: 'danger' }
+          { label: 'Remove from device', onPick: () => { if (removing) void onRemove(removing); }, variant: 'danger' }
         ]}
       />
 
-      <div className="dropveil" aria-hidden><span>Drop a folder of chapters</span></div>
+      <div className="dropveil" aria-hidden>
+        <span><Icon name="folder" size={28} /> Drop a folder of chapters</span>
+      </div>
 
       <style jsx>{`
-        .screen { max-width: 68rem; margin-inline: auto; padding: clamp(1.5rem, 4vw, 2.5rem) 1.25rem 6rem; position: relative; }
-        .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+        .screen { max-width: var(--page-max); margin-inline: auto; padding: clamp(1.25rem, 4vw, 2.5rem) var(--gutter) 6rem; position: relative; }
 
-        .head { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem 1.5rem; flex-wrap: wrap; }
-        .head .sub { margin: 0.5rem 0 0; }
-        .headtools { display: flex; gap: 0.5rem; flex-wrap: wrap; }
-        .headtools :global(a) { text-decoration: none; }
-
-        .note {
-          margin: 1rem 0 0; padding: 0.6rem 0.85rem; border-radius: 0.7rem;
-          border: 1px solid var(--rule); background: var(--ok-bg);
-          color: var(--ink); display: flex; gap: 0.75rem; align-items: baseline; justify-content: space-between;
+        /* ---- continue ---- */
+        .continue { margin-top: clamp(1.5rem, 4vw, 2.5rem); display: grid; gap: var(--s-4); }
+        .continue :global(.feature) {
+          display: grid; grid-template-columns: 5.5rem minmax(0, 1fr) auto; align-items: center; gap: var(--s-6);
+          padding: var(--s-5) var(--s-6) var(--s-5) var(--s-5);
+          border-radius: var(--r-xl); background: var(--surface); border: 1px solid var(--rule);
+          color: var(--ink); text-decoration: none;
+          transition: border-color var(--dur-2), box-shadow var(--dur-3) var(--ease-out), transform var(--dur-1) var(--ease-spring);
         }
-        .linkish {
-          background: none; border: 0; padding: 0; font: inherit; color: var(--accent);
-          cursor: pointer; text-decoration: underline; text-underline-offset: 0.16em;
-        }
-
-        /* ---- continue reading rail ---- */
-        .rail { margin-top: clamp(1.5rem, 4vw, 2.25rem); }
-        .sec { margin: 0 0 0.85rem; }
+        .continue :global(.feature:hover) { border-color: color-mix(in oklab, var(--accent) 40%, var(--rule)); box-shadow: var(--shadow-2); }
+        .continue :global(.feature:active) { transform: scale(0.995); }
+        .ft { display: grid; gap: var(--s-1); min-width: 0; }
+        .ftt { font-family: var(--font-serif); font-size: clamp(1.35rem, 1.1rem + 1vw, 1.8rem); font-weight: 500; line-height: 1.15; letter-spacing: -0.015em; }
+        .ftc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .ftm { display: grid; grid-template-columns: minmax(6rem, 16rem) auto; align-items: center; gap: var(--s-4); margin-top: var(--s-3); }
         .railrow {
-          list-style: none; margin: 0; padding: 0 0 0.35rem;
-          display: grid; grid-auto-flow: column; grid-auto-columns: min(20rem, 78vw);
-          gap: 0.75rem; overflow-x: auto; scroll-snap-type: x proximity;
-          overscroll-behavior-x: contain;
-          scrollbar-width: thin;
+          list-style: none; margin: 0; padding: 0 0 var(--s-1);
+          display: grid; grid-auto-flow: column; grid-auto-columns: min(16rem, 72vw); gap: var(--s-3);
+          overflow-x: auto; scroll-snap-type: x proximity; overscroll-behavior-x: contain; scrollbar-width: none;
         }
+        .railrow::-webkit-scrollbar { display: none; }
         .railrow li { scroll-snap-align: start; }
-        /* .resume and .row-main are <Link>s — styled-jsx scopes host elements only,
-           so they are reached with :global() from the scoped list around them. */
-        .railrow :global(.resume) {
-          display: flex; gap: 0.8rem; padding: 0.7rem; height: 100%;
-          border: 1px solid var(--rule); border-radius: var(--r-panel); text-decoration: none; color: var(--ink);
-          background: color-mix(in oklab, var(--ink) 3%, transparent);
-          transition: border-color var(--quick), background-color var(--quick), transform var(--quick);
+        .railrow :global(.mini) {
+          display: flex; gap: var(--s-4); align-items: center; padding: var(--s-3);
+          border-radius: var(--r-lg); border: 1px solid var(--rule); color: var(--ink); text-decoration: none;
+          transition: background-color var(--dur-2), transform var(--dur-1) var(--ease-spring);
         }
-        .railrow :global(.resume:hover) { border-color: color-mix(in oklab, var(--accent) 40%, var(--rule)); }
-        .railrow :global(.resume:active) { transform: scale(0.99); }
-        .railrow :global(.resume:focus-visible) { outline: var(--focus); outline-offset: var(--focus-gap); }
-        .railrow :global(.rart) { flex: none; width: 3.4rem; }
-        .railrow :global(.rart img), .rblank {
-          display: grid; place-items: center; width: 100%; aspect-ratio: 2/3; object-fit: cover;
-          border-radius: 0.45rem; background: color-mix(in oklab, var(--ink) 8%, transparent);
-          font-family: var(--serif); font-size: 1.35rem; color: var(--ink-faint);
-        }
-        .railrow :global(.rtext) { display: grid; gap: 0.18rem; align-content: start; min-width: 0; flex: 1; }
-        .railrow :global(.rtitle) { font-size: 0.92rem; line-height: 1.25; }
-        .railrow :global(.rch), .railrow :global(.rpct) {
-          display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-        }
-        .railrow :global(.rbar) {
-          display: block; height: 3px; border-radius: var(--r-round); margin: 0.35rem 0 0.1rem;
-          background: color-mix(in oklab, var(--ink) 14%, transparent);
-        }
-        .railrow :global(.rbar span) { display: block; height: 100%; border-radius: var(--r-round); background: var(--accent); }
-        .railrow :global(.rpct) { color: var(--ink-faint); }
+        .railrow :global(.mini:hover) { background: var(--fill); }
+        .railrow :global(.mini:active) { transform: scale(0.98); }
+        .railrow :global(.mini .cover) { width: 2.4rem; }
+        .mt { flex: 1; min-width: 0; display: grid; gap: var(--s-2); }
+        .mtt { font-size: var(--t-callout); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
         /* ---- controls ---- */
         .controls {
-          position: sticky; top: 3.1rem; z-index: var(--z-sticky);
-          margin: clamp(1.5rem, 4vw, 2.25rem) -1.25rem 0; padding: 0.6rem 1.25rem 0.7rem;
+          position: sticky; top: 3.5rem; z-index: var(--z-sticky);
+          margin: clamp(1.75rem, 4vw, 2.5rem) calc(var(--gutter) * -1) 0; padding: var(--s-3) var(--gutter) var(--s-4);
           background: var(--chrome);
-          backdrop-filter: blur(24px) saturate(180%); -webkit-backdrop-filter: blur(24px) saturate(180%);
-          display: grid; gap: 0.6rem;
+          backdrop-filter: blur(20px) saturate(170%); -webkit-backdrop-filter: blur(20px) saturate(170%);
+          display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s-3);
         }
-        .tabs { display: flex; gap: 0.2rem; overflow-x: auto; scrollbar-width: none; }
+        .row1 { display: flex; justify-content: space-between; gap: var(--s-4); align-items: center; }
+        .tabs { overflow-x: auto; scrollbar-width: none; flex: 0 1 auto; min-width: 0; }
+        .row1 > :global(.views) { flex: none; }
         .tabs::-webkit-scrollbar { display: none; }
-        .tab {
-          flex: none; background: transparent; border: 0; cursor: pointer; font: inherit;
-          font-size: 0.86rem; color: var(--ink-dim); padding: 0.42rem 0.7rem; border-radius: 0.6rem;
-          transition: color var(--quick), background-color var(--quick);
-        }
-        .tab:hover { color: var(--ink); background: color-mix(in oklab, var(--ink) 6%, transparent); }
-        .tab[data-active] { color: var(--accent); background: color-mix(in oklab, var(--accent) 12%, transparent); }
-        .tab:focus-visible { outline: var(--focus); outline-offset: var(--focus-gap); }
-        .tab .n { color: inherit; opacity: 0.6; }
-
-        .filters { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
-        .search {
-          display: flex; align-items: center; gap: 0.45rem; flex: 1 1 12rem; min-width: 0;
-          border: 1px solid var(--rule); border-radius: var(--r-control); padding: 0 var(--s-4);
-          color: var(--ink-faint);
-          transition: border-color var(--quick);
-        }
-        .search:focus-within { border-color: color-mix(in oklab, var(--accent) 55%, var(--rule)); }
-        .search :global(input) {
-          flex: 1; min-width: 0; background: transparent; border: 0; outline: none;
-          color: var(--ink); font: inherit; font-size: 0.86rem; padding: 0.45rem 0;
-        }
-        .sel :global(select) {
-          background: transparent; color: var(--ink); font: inherit; font-size: 0.84rem;
-          border: 1px solid var(--rule); border-radius: 0.62rem; padding: 0.42rem 0.5rem; cursor: pointer;
-        }
-        .sel :global(select:disabled) { opacity: 0.45; cursor: default; }
-        .chips { display: flex; gap: 0.25rem; flex-wrap: wrap; }
-        .chip {
-          background: transparent; border: 1px solid var(--rule); border-radius: var(--r-round);
-          color: var(--ink-dim); font: inherit; font-size: 0.78rem; padding: 0.3rem 0.68rem;
-          cursor: pointer; transition: color var(--quick), border-color var(--quick), background-color var(--quick);
-        }
-        .chip:hover { color: var(--ink); }
-        .chip[data-on] {
-          color: var(--accent); border-color: color-mix(in oklab, var(--accent) 45%, var(--rule));
-          background: color-mix(in oklab, var(--accent) 10%, transparent);
-        }
-        .chip:focus-visible { outline: var(--focus); outline-offset: var(--focus-gap); }
+        .tabs button { flex: none; }
+        .tabs .n { margin-left: 0.15rem; color: var(--ink-3); font-weight: 500; }
+        .views button { padding: 0 var(--s-3); }
+        .row2 { display: flex; gap: var(--s-3); align-items: center; flex-wrap: wrap; }
+        .row2 :global(.search) { flex: 1 1 14rem; }
+        .chips { display: flex; gap: var(--s-2); flex-wrap: wrap; }
 
         /* ---- shelves ---- */
-        .grid {
-          list-style: none; margin: 1.5rem 0 0; padding: 0;
-          display: grid; gap: 1.75rem 1.2rem;
-          grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
-        }
-        @media (max-width: 26rem) { .grid { grid-template-columns: repeat(2, 1fr); gap: 1.4rem 0.9rem; } }
+        .shelves { margin-top: var(--s-5); }
 
-        .rows { list-style: none; margin: 1.25rem 0 0; padding: 0; display: grid; gap: 1px; }
-        .rows li {
-          display: flex; align-items: center; gap: 0.5rem;
-          border-top: 1px solid var(--rule);
-        }
-        .rows li:last-child { border-bottom: 1px solid var(--rule); }
+        .rows { list-style: none; margin: 0; padding: 0; display: grid; }
+        .rows li { display: flex; align-items: center; gap: var(--s-2); }
+        .rows li + li { box-shadow: 0 -1px 0 var(--rule); }
         .rows :global(.row-main) {
-          flex: 1; min-width: 0; display: grid; gap: 0.25rem; text-decoration: none; color: var(--ink);
-          padding: 0.85rem 0.5rem; border-radius: 0.6rem;
-          transition: background-color var(--quick);
+          flex: 1; min-width: 0; display: grid; gap: var(--s-1); text-decoration: none; color: var(--ink);
+          padding: var(--s-4) var(--s-3); border-radius: var(--r-md);
+          transition: background-color var(--dur-2);
         }
-        .rows :global(.row-main:hover) { background: color-mix(in oklab, var(--ink) 5%, transparent); }
-        .rows :global(.row-main:focus-visible) { outline: var(--focus); outline-offset: -2px; }
-        .rows :global(.rowtop) {
-          display: flex; gap: 0.75rem; align-items: baseline; justify-content: space-between; flex-wrap: wrap;
-        }
-        .rows :global(.rowt) { font-size: 0.98rem; }
-        .rows :global(.quote) {
-          font-family: var(--serif); color: var(--ink-dim); font-size: 0.92rem; font-style: italic;
+        .rows :global(.row-main:hover) { background: var(--fill); }
+        .rows :global(.row-main.hist) { grid-template-columns: 2.4rem minmax(0, 1fr); align-items: center; gap: var(--s-4); }
+        .ht { display: grid; gap: 0.1rem; min-width: 0; }
+        .rowtop { display: flex; gap: var(--s-4); align-items: baseline; justify-content: space-between; flex-wrap: wrap; }
+        .rowt { display: inline-flex; align-items: center; gap: var(--s-2); font-size: var(--t-body); font-weight: 600; }
+        .rowt :global(.bmi) { color: var(--accent); }
+        .quote {
+          font-family: var(--font-serif); color: var(--ink-2); font-size: 0.98rem; font-style: italic; line-height: 1.5;
           display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
         }
-        .rows :global(.quote.plain) { font-style: normal; font-family: var(--ui); font-size: 0.82rem; }
-        .rowx {
-          flex: none; width: 2.2rem; height: 2.2rem; border-radius: 0.5rem; border: 0;
-          background: transparent; color: var(--ink-dim); cursor: pointer; font-size: 0.9rem;
-        }
-        .rowx:hover { background: color-mix(in oklab, var(--ink) 10%, transparent); color: var(--ink); }
-        .rowx:focus-visible { outline: var(--focus); outline-offset: -2px; }
-        .rows :global(.small) { flex: none; font-size: 0.78rem; text-decoration: none; }
 
-        .foot { margin: 2.5rem 0 0; color: var(--ink-faint); }
+        .foot { margin: var(--s-8) 0 0; color: var(--ink-3); }
+        .foot :global(.inl) { display: inline; vertical-align: -2px; }
 
         /* ---- drop target: the whole page, announced only while dragging ---- */
         .dropveil {
           position: fixed; inset: 0; z-index: var(--z-overlay); display: grid; place-items: center;
-          background: color-mix(in oklab, var(--paper) 78%, transparent);
+          background: color-mix(in oklab, var(--bg) 80%, transparent);
           backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
-          opacity: 0; pointer-events: none; transition: opacity var(--quick);
+          opacity: 0; pointer-events: none; transition: opacity var(--dur-2);
         }
         .screen[data-dragging] .dropveil { opacity: 1; }
         .dropveil span {
-          border: 1px dashed color-mix(in oklab, var(--accent) 60%, var(--rule));
-          border-radius: 1rem; padding: 2rem 3rem; font-size: 1.05rem;
+          display: flex; align-items: center; gap: var(--s-4);
+          border: 2px dashed color-mix(in oklab, var(--accent) 60%, var(--rule)); color: var(--ink);
+          border-radius: var(--r-xl); padding: var(--s-7) var(--s-8); font-size: 1.1rem; font-weight: 500;
+          background: var(--surface);
+          transform: scale(0.96); transition: transform var(--dur-3) var(--ease-spring);
         }
-        code { font-family: ui-monospace, monospace; font-size: 0.9em; }
-      `}</style>
-    </div>
-  );
-}
+        .screen[data-dragging] .dropveil span { transform: none; }
 
-/** Every empty shelf looks the same and says something different. A shared frame keeps
- *  "nothing here" from reading like "something broke". */
-function EmptyState({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="state">
-      <h2 className="title">{title}</h2>
-      {children}
-      <style jsx>{`
-        .state {
-          display: grid; justify-items: center; gap: 0.7rem; text-align: center;
-          margin: 2.5rem auto 0; padding: clamp(2rem, 7vw, 3.5rem) 1.5rem;
-          max-width: 32rem; border: 1px dashed var(--rule); border-radius: 1rem;
+        @media (max-width: 40rem) {
+          .controls { top: 3.25rem; }
+          .continue :global(.feature) { grid-template-columns: 4.25rem minmax(0, 1fr); gap: var(--s-4); padding: var(--s-4); }
+          .fgo { display: none !important; }
+          .ftm { grid-template-columns: 1fr auto; }
+          .chips { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; width: 100%; }
+          .row2 :global(.search) { flex-basis: 100%; }
+          .row2 > label:not(.search) { flex: 1; }
+          .row2 :global(.select) { width: 100%; }
+          .tabs button { padding: 0 var(--s-3); }
         }
-        .state h2 { margin: 0; }
-        .state :global(p) { margin: 0; max-width: 26rem; }
-        .state :global(.row) { display: flex; gap: 0.5rem; flex-wrap: wrap; justify-content: center; }
-        .state :global(a) { text-decoration: none; }
       `}</style>
     </div>
   );
@@ -629,40 +617,22 @@ function EmptyState({ title, children }: { title: string; children: React.ReactN
 /** Shelf-shaped placeholders, so the page doesn't reflow when the data lands. */
 function Skeleton() {
   return (
-    <div className="screen" aria-busy="true" aria-live="polite">
-      <span className="sr">Loading your library</span>
-      <div className="bar w1" />
-      <div className="bar w2" />
-      <ul className="grid">
-        {Array.from({ length: 8 }, (_, i) => (
+    <div className="screen" aria-busy="true">
+      <span className="sr-only" role="status">Loading your library</span>
+      <span className="skel" style={{ width: '10rem', height: '2.6rem' }} />
+      <span className="skel" style={{ width: '8rem', height: '0.8rem', margin: '0.75rem 0 2.5rem' }} />
+      <span className="skel" style={{ height: '8rem', borderRadius: 'var(--r-xl)', marginBottom: '2rem' }} />
+      <ul className="libgrid">
+        {Array.from({ length: 6 }, (_, i) => (
           <li key={i}>
-            <div className="art" />
-            <div className="bar w3" />
-            <div className="bar w4" />
+            <span className="skel" style={{ aspectRatio: '2/3', borderRadius: 'var(--r-cover)', marginBottom: '0.8rem' }} />
+            <span className="skel" style={{ height: '0.85rem', width: '80%' }} />
+            <span className="skel" style={{ height: '0.7rem', width: '50%', marginTop: '0.45rem' }} />
           </li>
         ))}
       </ul>
       <style jsx>{`
-        .screen { max-width: 68rem; margin-inline: auto; padding: clamp(1.5rem, 4vw, 2.5rem) 1.25rem 6rem; }
-        .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
-        .bar, .art {
-          background: color-mix(in oklab, var(--ink) 8%, transparent);
-          border-radius: 0.4rem; animation: pulse 1.6s ease-in-out infinite;
-        }
-        .art { aspect-ratio: 2/3; border-radius: 0.7rem; margin-bottom: 0.6rem; }
-        .w1 { height: 2.4rem; width: 9rem; }
-        .w2 { height: 0.9rem; width: 13rem; margin: 0.7rem 0 2.5rem; }
-        .w3 { height: 0.85rem; width: 80%; }
-        .w4 { height: 0.7rem; width: 55%; margin-top: 0.4rem; }
-        .grid {
-          list-style: none; margin: 0; padding: 0;
-          display: grid; gap: 1.75rem 1.2rem;
-          grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
-        }
-        @media (max-width: 26rem) { .grid { grid-template-columns: repeat(2, 1fr); } }
-        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
-        /* Reduced motion gets a held placeholder, not a dead grey page. */
-        @media (prefers-reduced-motion: reduce) { .bar, .art { animation: none; opacity: 0.7; } }
+        .screen { max-width: var(--page-max); margin-inline: auto; padding: clamp(1.25rem, 4vw, 2.5rem) var(--gutter) 6rem; }
       `}</style>
     </div>
   );

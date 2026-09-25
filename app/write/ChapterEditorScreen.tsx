@@ -2,23 +2,31 @@
 // The chapter editor. One screen, two jobs — writing a new chapter and rewriting an
 // existing one — because they are the same act with different starting text.
 //
-// It replaced a side drawer that sat over the novel page. A drawer was the wrong shape:
-// writing wants the whole window and the page's own scrollbar, not a panel with an
-// inner one. The body textarea grows to fit its content and the *page* scrolls, which
-// is why there is no scroll box around the prose.
+// Writing wants the whole window and the page's own scrollbar, not a panel with an
+// inner one: the body textarea grows to fit its content and the *page* scrolls.
 //
-// Saving is automatic. The Done button is a way out, not the thing that keeps the work.
+// Controls live in the chrome — the bar at the top, the formatting strip (at the thumb
+// on a phone) — and the page is only title and text. While you type, the chrome dims;
+// move the pointer and it's back.
+//
+// Saving is automatic. Done is a way out, not the thing that keeps the work.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import ConfirmDialog from '@/components/ConfirmDialog';
-import { getNovel, putNovel, type StoredNovel } from '@/lib/library';
+import Icon, { type IconName } from '@/components/Icon';
+import Menu from '@/components/Menu';
+import Shortcuts from '@/components/Shortcuts';
+import { toast } from '@/components/Toaster';
+import { getNovel, notifyChanged, putNovel, type StoredNovel } from '@/lib/library';
 import {
   chapterLabel, countWords, draftSlug, orderedChapters, readingMinutes,
   removeChapter, upsertChapter
 } from '@/lib/chapters';
-import { NEW_CHAPTER, chapterEditHref, localNovelHref } from '@/lib/routes';
+import { md } from '@/lib/reader/markdown';
+import { NEW_CHAPTER, chapterEditHref, localChapterHref, localNovelHref } from '@/lib/routes';
+import { isMac } from '@/lib/ui';
 
 type Status = 'clean' | 'dirty' | 'saving' | 'saved' | 'error';
 
@@ -29,9 +37,9 @@ const IDLE_MS = 900;
 function savedAgo(at: number, now: number): string {
   const s = Math.round((now - at) / 1000);
   if (s < 5) return 'Saved';
-  if (s < 60) return `Saved ${s} seconds ago`;
+  if (s < 60) return `Saved ${s}s ago`;
   const m = Math.round(s / 60);
-  if (m < 60) return `Saved ${m} minute${m === 1 ? '' : 's'} ago`;
+  if (m < 60) return `Saved ${m} min ago`;
   return `Saved at ${new Date(at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
 }
 
@@ -48,7 +56,11 @@ export default function ChapterEditorScreen() {
   const [status, setStatus] = useState<Status>('clean');
   const [savedAt, setSavedAt] = useState(0);
   const [now, setNow] = useState(0);
-  const [ask, setAsk] = useState<null | 'leave' | 'delete'>(null);
+  const [ask, setAsk] = useState<null | { kind: 'leave'; to: string } | { kind: 'delete' }>(null);
+  const [preview, setPreview] = useState(false);
+  const [typing, setTyping] = useState(false);
+  const [keys, setKeys] = useState(false);
+  const [mac, setMac] = useState(true);
 
   const area = useRef<HTMLTextAreaElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -62,24 +74,37 @@ export default function ChapterEditorScreen() {
    *  fire again, so the last thing typed would be the one thing lost. */
   const rev = useRef(0);
 
-  /* ---- load ---- */
+  useEffect(() => setMac(isMac()), []);
+
+  /* ---- load ----
+     Runs per chapter. When the URL changes only because this draft just got its slug
+     (the replace after a first save), the text on screen is already the truth — reloading
+     would overwrite anything typed while the save was in flight. */
   useEffect(() => {
     if (!novelId) { setPhase('missing'); return; }
+    if (param !== NEW_CHAPTER && param === slug.current && novel?.id === novelId && phase === 'ready') return;
+    let live = true;
     (async () => {
       try {
         const n = await getNovel(novelId);
+        if (!live) return;
         if (!n) { setPhase('missing'); return; }
         setNovel(n);
-        if (param !== NEW_CHAPTER) {
+        if (param === NEW_CHAPTER) {
+          slug.current = ''; setTitle(''); setBody('');
+        } else {
           const c = n.chapters.find(x => x.slug === param);
           if (!c) { setPhase('missing'); return; }
-          setTitle(c.title);
-          setBody(c.body);
-          slug.current = c.slug;
+          slug.current = c.slug; setTitle(c.title); setBody(c.body);
         }
+        rev.current = 0;
+        setStatus('clean'); setPreview(false);
         setPhase('ready');
-      } catch { setPhase('missing'); }
+        window.scrollTo(0, 0);
+      } catch { if (live) setPhase('missing'); }
     })();
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [novelId, param]);
 
   /* ---- save ---- */
@@ -115,7 +140,7 @@ export default function ChapterEditorScreen() {
     }
   }, [novel, router]);
 
-  /* Autosave on idle. The ref dance keeps this from re-subscribing on every keystroke. */
+  /* Autosave on idle. */
   useEffect(() => {
     if (status !== 'dirty') return;
     timer.current = setTimeout(() => void save(), IDLE_MS);
@@ -137,6 +162,14 @@ export default function ChapterEditorScreen() {
     const t = setInterval(() => setNow(Date.now()), 15000);
     return () => clearInterval(t);
   }, [status]);
+
+  /* Chrome dims while typing, and comes back the moment the pointer moves. */
+  useEffect(() => {
+    if (!typing) return;
+    const wake = () => setTyping(false);
+    window.addEventListener('pointermove', wake, { once: true });
+    return () => window.removeEventListener('pointermove', wake);
+  }, [typing]);
 
   const edit = (fn: () => void) => { fn(); rev.current += 1; setStatus('dirty'); };
 
@@ -187,31 +220,53 @@ export default function ChapterEditorScreen() {
     setBody(el.value);
   };
 
-  /* ---- leaving ---- */
+  const sceneBreak = () => {
+    const el = area.current;
+    if (!el) return;
+    el.focus();
+    document.execCommand('insertText', false, '\n\n* * *\n\n');
+    setBody(el.value);
+  };
+
+  /* ---- leaving / moving between chapters ---- */
   const back = localNovelHref(novelId);
 
-  const leave = useCallback(async () => {
+  const leave = useCallback(async (to: string) => {
     if (timer.current) clearTimeout(timer.current);
     // Autosave means there is almost never anything to lose. The one moment there is,
     // is a save that already failed — so that is the only time we stop and ask.
     if (status === 'dirty' || status === 'saving') {
       const ok = await save();
-      if (!ok) { setAsk('leave'); return; }
+      if (!ok) { setAsk({ kind: 'leave', to }); return; }
     } else if (status === 'error') {
-      setAsk('leave');
+      setAsk({ kind: 'leave', to });
       return;
     }
-    router.push(back);
-  }, [status, save, router, back]);
+    router.push(to);
+  }, [status, save, router]);
+
+  const chapters = novel ? orderedChapters(novel) : [];
+  const index = slug.current ? chapters.findIndex(c => c.slug === slug.current) : -1;
+  const number = index >= 0 ? index : chapters.length;
+  const prevCh = index > 0 ? chapters[index - 1] : index < 0 ? chapters[chapters.length - 1] : undefined;
+  const nextCh = index >= 0 ? chapters[index + 1] : undefined;
 
   /* ---- keyboard ---- */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (document.querySelector('[aria-modal="true"]')) return;
       const meta = e.metaKey || e.ctrlKey;
-      if (meta && e.key.toLowerCase() === 's') { e.preventDefault(); void save(); return; }
-      if (meta && e.key.toLowerCase() === 'b') { e.preventDefault(); edit(() => wrap('**')); return; }
-      if (meta && e.key.toLowerCase() === 'i') { e.preventDefault(); edit(() => wrap('*')); return; }
-      if (e.key === 'Escape' && !ask) { e.preventDefault(); void leave(); }
+      const k = e.key.toLowerCase();
+      if (meta && k === 's') { e.preventDefault(); void save(); return; }
+      if (meta && k === 'b') { e.preventDefault(); edit(() => wrap('**')); return; }
+      if (meta && k === 'i') { e.preventDefault(); edit(() => wrap('*')); return; }
+      if (meta && k === 'k') { e.preventDefault(); edit(link); return; }
+      if (meta && e.key === 'Enter') { e.preventDefault(); void leave(back); return; }
+      if (e.altKey && k === 'p') { e.preventDefault(); setPreview(p => !p); return; }
+      if (e.altKey && e.key === 'ArrowUp' && prevCh) { e.preventDefault(); void leave(chapterEditHref(novelId, prevCh.slug)); return; }
+      if (e.altKey && e.key === 'ArrowDown') { e.preventDefault(); void leave(chapterEditHref(novelId, nextCh?.slug ?? NEW_CHAPTER)); return; }
+      if (e.key === 'Escape') { e.preventDefault(); if (preview) setPreview(false); else void leave(back); return; }
+      if (e.key === '?' && !(e.target as HTMLElement).matches('input, textarea')) { e.preventDefault(); setKeys(true); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -224,26 +279,34 @@ export default function ChapterEditorScreen() {
     el.style.height = 'auto';
     el.style.height = `${el.scrollHeight}px`;
   }, []);
-  useEffect(() => { grow(); }, [body, phase, grow]);
+  useEffect(() => { grow(); }, [body, phase, preview, grow]);
 
   const words = useMemo(() => countWords(body), [body]);
-  const chapters = novel ? orderedChapters(novel) : [];
-  const index = slug.current ? chapters.findIndex(c => c.slug === slug.current) : -1;
-  const number = index >= 0 ? index : chapters.length;
+  const chars = body.length;
+  const previewHtml = useMemo(() => (preview ? md(body) : ''), [preview, body]);
 
   if (phase === 'loading')
-    return <main className="wrap"><p className="caption" aria-live="polite">Opening the editor…</p></main>;
+    return (
+      <main className="wrap" aria-busy="true">
+        <span className="sr-only" role="status">Opening the editor…</span>
+        <div style={{ maxWidth: 'var(--measure)', margin: '2rem auto', display: 'grid', gap: '1rem' }}>
+          <span className="skel" style={{ width: '6rem', height: '0.7rem' }} />
+          <span className="skel" style={{ width: '60%', height: '2.6rem', marginBottom: '1.5rem' }} />
+          {[100, 97, 99, 55].map((w, i) => <span key={i} className="skel" style={{ width: `${w}%`, height: '1rem' }} />)}
+        </div>
+      </main>
+    );
 
   if (phase === 'missing' || !novel)
     return (
       <main className="wrap">
-        <h1 className="display">That chapter isn&apos;t here</h1>
-        <p className="lede">
-          It may have been deleted, or the link may point at a book that isn&apos;t on
-          this device.
-        </p>
-        <div className="cta">
-          <Link href="/library" className="btn" data-variant="primary">Go to your library</Link>
+        <div className="empty">
+          <span className="glyph"><Icon name="file" size={26} /></span>
+          <h1 className="title">That chapter isn’t here</h1>
+          <p>It may have been deleted, or the link may point at a book that isn’t on this device.</p>
+          <div className="actions">
+            <Link href="/library" className="btn" data-variant="primary">Go to your library</Link>
+          </div>
         </div>
       </main>
     );
@@ -251,87 +314,163 @@ export default function ChapterEditorScreen() {
   const statusText =
     status === 'saving' ? 'Saving…'
     : status === 'error' ? 'Not saved'
-    : status === 'dirty' ? 'Unsaved changes'
+    : status === 'dirty' ? 'Edited'
     : status === 'saved' ? savedAgo(savedAt, now)
-    : 'No changes yet';
+    : slug.current ? 'Saved' : 'Draft';
+  const statusIcon: IconName | null = status === 'error' ? 'alert' : status === 'saved' || (status === 'clean' && slug.current) ? 'check' : null;
+  const mod = mac ? '⌘' : 'Ctrl';
+  const alt = mac ? '⌥' : 'Alt';
+
+  const tools: { icon: IconName; label: string; key?: string; run: () => void }[] = [
+    { icon: 'bold', label: 'Bold', key: `${mod} B`, run: () => edit(() => wrap('**')) },
+    { icon: 'italic', label: 'Italic', key: `${mod} I`, run: () => edit(() => wrap('*')) },
+    { icon: 'heading', label: 'Heading', run: () => edit(() => prefixLines('## ')) },
+    { icon: 'quote', label: 'Quote', run: () => edit(() => prefixLines('> ')) },
+    { icon: 'bullets', label: 'List', run: () => edit(() => prefixLines('- ')) },
+    { icon: 'link', label: 'Link', key: `${mod} K`, run: () => edit(link) },
+    { icon: 'scene', label: 'Scene break', run: () => edit(sceneBreak) }
+  ];
 
   return (
-    <div className="screen">
+    <div className="screen" data-editor data-typing={typing || undefined}>
       <header className="bar chrome">
-        <button className="back" onClick={() => void leave()}>
-          <span aria-hidden>‹</span> <span className="bt">{novel.title}</span>
-        </button>
-
-        <p className="status caption" role="status" aria-live="polite" data-state={status}>
-          {status === 'error' && <span className="dot" aria-hidden />}
-          {statusText}
-        </p>
-
-        <button className="btn" data-variant="primary" onClick={() => void leave()}>Done</button>
-      </header>
-
-      <main className="sheet">
-        <p className="num caption mono">{chapterLabel(number).toUpperCase()}</p>
-
-        <input
-          className="ctitle"
-          value={title}
-          onChange={e => edit(() => setTitle(e.target.value))}
-          placeholder="Chapter title"
-          aria-label="Chapter title"
-          spellCheck
-        />
-
-        <div className="tools" role="toolbar" aria-label="Formatting">
-          <button onClick={() => edit(() => wrap('**'))} aria-label="Bold" title="Bold — Ctrl/Cmd B"><b>B</b></button>
-          <button onClick={() => edit(() => wrap('*'))} aria-label="Italic" title="Italic — Ctrl/Cmd I"><i>I</i></button>
-          <span className="sep" aria-hidden />
-          <button onClick={() => edit(() => prefixLines('## '))} aria-label="Heading" title="Heading">H</button>
-          <button onClick={() => edit(() => prefixLines('> '))} aria-label="Quote" title="Quote">&ldquo;</button>
-          <button onClick={() => edit(() => prefixLines('- '))} aria-label="List" title="List">•</button>
-          <span className="sep" aria-hidden />
-          <button onClick={() => edit(link)} aria-label="Link" title="Link">↗</button>
+        <div className="l">
+          <button className="icon-btn" onClick={() => void leave(back)} aria-label={`Back to ${novel.title}`} title={novel.title}>
+            <Icon name="back" />
+          </button>
+          <label className="picker">
+            <span className="sr-only">Chapter</span>
+            <select
+              className="select"
+              value={slug.current || NEW_CHAPTER}
+              onChange={e => void leave(chapterEditHref(novelId, e.target.value))}
+            >
+              {chapters.map((c, i) => <option key={c.slug} value={c.slug}>{i + 1}. {c.title}</option>)}
+              {!slug.current && <option value={NEW_CHAPTER}>{chapters.length + 1}. {title.trim() || 'New chapter'}</option>}
+              {slug.current && <option value={NEW_CHAPTER}>＋ New chapter</option>}
+            </select>
+          </label>
         </div>
 
-        <textarea
-          ref={area}
-          className="cbody"
-          value={body}
-          onChange={e => edit(() => setBody(e.target.value))}
-          onInput={grow}
-          placeholder="Start writing…"
-          aria-label="Chapter text"
-          spellCheck
-        />
-
-        <p className="count caption mono">
-          {words.toLocaleString()} {words === 1 ? 'word' : 'words'}
-          {words > 0 && ` · ${readingMinutes(words)} min read`}
+        <p className="status" role="status" aria-live="polite" data-state={status}>
+          {status === 'saving' && <span className="spin" aria-hidden />}
+          {statusIcon && <Icon name={statusIcon} size={14} />}
+          <span className="st">{statusText}</span>
+          {status === 'error' && <button className="linkish" onClick={() => void save()}>Retry</button>}
         </p>
 
-        {slug.current && (
-          <div className="danger-zone">
-            <button className="btn danger" onClick={() => setAsk('delete')}>Delete this chapter</button>
-          </div>
+        <div className="r">
+          <button className="icon-btn hide-sm" disabled={!prevCh} onClick={() => prevCh && void leave(chapterEditHref(novelId, prevCh.slug))}
+                  aria-label="Previous chapter" title={`Previous chapter (${alt} ↑)`}>
+            <Icon name="up" />
+          </button>
+          <button className="icon-btn hide-sm" onClick={() => void leave(chapterEditHref(novelId, nextCh?.slug ?? NEW_CHAPTER))}
+                  aria-label={nextCh ? 'Next chapter' : 'New chapter'} title={`${nextCh ? 'Next chapter' : 'New chapter'} (${alt} ↓)`}>
+            <Icon name={nextCh ? 'down' : 'plus'} />
+          </button>
+          <button className="icon-btn" aria-pressed={preview} onClick={() => setPreview(p => !p)}
+                  aria-label={preview ? 'Back to writing' : 'Preview'} title={`Preview (${alt} P)`}>
+            <Icon name={preview ? 'pen' : 'eye'} />
+          </button>
+          <Menu
+            label="Chapter actions"
+            items={[
+              ...(slug.current ? [{ label: 'Read this chapter', icon: 'book' as const, onSelect: () => void leave(localChapterHref(novelId, slug.current)) }] : []),
+              { label: 'Keyboard shortcuts', icon: 'keyboard', hint: '?', onSelect: () => setKeys(true) },
+              ...(slug.current ? ['sep' as const, { label: 'Delete chapter', icon: 'trash' as const, tone: 'danger' as const, onSelect: () => setAsk({ kind: 'delete' }) }] : [])
+            ]}
+          />
+          <button className="btn done" data-variant="primary" data-size="sm" onClick={() => void leave(back)} title={`${mod} ↵`}>Done</button>
+        </div>
+      </header>
+
+      {!preview && (
+        <div className="tools chrome" role="toolbar" aria-label="Formatting">
+          {tools.map((t, i) => (
+            <span key={t.label} className="tw">
+              {(i === 2 || i === 5) && <span className="sep" aria-hidden />}
+              <button onMouseDown={e => e.preventDefault()} onClick={t.run} aria-label={t.label} title={t.key ? `${t.label} — ${t.key}` : t.label}>
+                <Icon name={t.icon} size={18} />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      <main className="sheet">
+        <p className="eyebrow">{chapterLabel(number)}<span className="of"> · {novel.title}</span></p>
+
+        {preview ? (
+          <>
+            <h1 className="ctitle as-text">{title.trim() || 'Untitled chapter'}</h1>
+            {body.trim()
+              ? <article className="prose pv" dangerouslySetInnerHTML={{ __html: previewHtml }} />
+              : <p className="caption">Nothing written yet.</p>}
+          </>
+        ) : (
+          <>
+            <input
+              className="ctitle"
+              value={title}
+              onChange={e => edit(() => setTitle(e.target.value))}
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); area.current?.focus(); } }}
+              placeholder="Chapter title"
+              aria-label="Chapter title"
+              spellCheck
+              autoFocus={!slug.current}
+            />
+            <textarea
+              ref={area}
+              className="cbody"
+              value={body}
+              onChange={e => edit(() => setBody(e.target.value))}
+              onInput={grow}
+              onKeyDown={() => setTyping(true)}
+              placeholder="Start writing…"
+              aria-label="Chapter text"
+              spellCheck
+            />
+          </>
         )}
       </main>
 
+      <footer className="counts caption mono" aria-label="Counts">
+        <span>{words.toLocaleString()} {words === 1 ? 'word' : 'words'}</span>
+        <span>{chars.toLocaleString()} characters</span>
+        {words > 0 && <span>{readingMinutes(words)} min read</span>}
+      </footer>
+
+      <Shortcuts
+        open={keys}
+        onClose={() => setKeys(false)}
+        groups={[
+          { name: 'Writing', items: [
+            { keys: [mod, 'B'], label: 'Bold' }, { keys: [mod, 'I'], label: 'Italic' },
+            { keys: [mod, 'K'], label: 'Link' }, { keys: [mod, 'S'], label: 'Save now' }
+          ] },
+          { name: 'Moving', items: [
+            { keys: [alt, '↑'], label: 'Previous chapter' }, { keys: [alt, '↓'], label: 'Next / new chapter' },
+            { keys: [alt, 'P'], label: 'Preview' }, { keys: [mod, '↵'], label: 'Done' }, { keys: ['Esc'], label: 'Back to the book' }
+          ] }
+        ]}
+      />
+
       <ConfirmDialog
-        open={ask === 'leave'}
+        open={ask?.kind === 'leave'}
         title="This chapter didn’t save"
         body="Your writing is still on screen. Leaving now loses the changes made since the last save."
         onDismiss={() => setAsk(null)}
         choices={[
           { label: 'Keep editing', onPick: () => setAsk(null), variant: 'primary' },
-          { label: 'Try saving again', onPick: async () => { setAsk(null); if (await save()) router.push(back); } },
-          { label: 'Discard and leave', onPick: () => { setAsk(null); router.push(back); }, variant: 'danger' }
+          { label: 'Try saving again', onPick: async () => { const to = ask?.kind === 'leave' ? ask.to : back; setAsk(null); if (await save()) router.push(to); } },
+          { label: 'Discard and leave', onPick: () => { const to = ask?.kind === 'leave' ? ask.to : back; setAsk(null); setStatus('clean'); router.push(to); }, variant: 'danger' }
         ]}
       />
 
       <ConfirmDialog
-        open={ask === 'delete'}
+        open={ask?.kind === 'delete'}
         title={`Delete “${title.trim() || 'this chapter'}”?`}
-        body="The text is removed from this device. There is no undo."
+        body="The text is removed from this device. You’ll have a few seconds to undo."
         onDismiss={() => setAsk(null)}
         choices={[
           { label: 'Keep it', onPick: () => setAsk(null), variant: 'primary' },
@@ -341,9 +480,15 @@ export default function ChapterEditorScreen() {
             onPick: async () => {
               setAsk(null);
               if (timer.current) clearTimeout(timer.current);
+              const before = upsertChapter(novel, { slug: slug.current, title, body });
               try {
-                await putNovel(removeChapter(novel, slug.current));
+                await putNovel(removeChapter(before, slug.current));
+                setStatus('clean');
                 router.push(back);
+                toast({
+                  message: `Deleted “${title.trim() || 'Untitled chapter'}”`,
+                  action: { label: 'Undo', onClick: async () => { await putNovel(before); notifyChanged(); } }
+                });
               } catch { setStatus('error'); }
             }
           }
@@ -355,98 +500,108 @@ export default function ChapterEditorScreen() {
 
         .bar {
           position: sticky; top: 0; z-index: var(--z-crumb);
-          display: flex; align-items: center; gap: var(--s-4);
-          padding: var(--s-3) max(var(--s-5), env(safe-area-inset-left));
+          display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: var(--s-4);
+          height: calc(3.5rem + env(safe-area-inset-top, 0px));
+          padding: env(safe-area-inset-top, 0px) max(var(--s-3), env(safe-area-inset-right)) 0 max(var(--s-3), env(safe-area-inset-left));
+          box-shadow: 0 1px 0 var(--rule);
+          transition: opacity var(--dur-4) var(--ease-out);
         }
-        .back {
-          display: flex; align-items: center; gap: var(--s-1);
-          background: none; border: 0; cursor: pointer; font: inherit; font-size: 0.86rem;
-          color: var(--ink-dim); padding: var(--s-2) var(--s-2) var(--s-2) 0;
-          border-radius: var(--r-tight); min-width: 0;
-        }
-        .back:hover { color: var(--ink); }
-        .back:focus-visible { outline: var(--focus); outline-offset: var(--focus-gap); }
-        .bt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .l, .r { display: flex; align-items: center; gap: var(--s-1); min-width: 0; }
+        .r { justify-content: flex-end; }
+        .picker { min-width: 0; max-width: 18rem; flex: 1 1 auto; }
+        .picker :global(.select) { width: 100%; background-color: transparent; font-weight: 500; text-overflow: ellipsis; }
+        .picker :global(.select:hover) { background-color: var(--fill); }
+        .r :global(.done) { margin-left: var(--s-2); }
 
-        /* Centre column so the status sits under the writer's eye, not off in a corner. */
         .status {
-          flex: 1; text-align: center; margin: 0;
-          display: flex; align-items: center; justify-content: center; gap: var(--s-2);
-          overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+          margin: 0; display: inline-flex; align-items: center; gap: var(--s-2);
+          font-size: var(--t-caption); color: var(--ink-3); white-space: nowrap;
+          padding: 0.25rem 0.7rem; border-radius: var(--r-round); background: var(--fill);
         }
-        .status[data-state='error'] { color: var(--err); }
-        .status[data-state='saving'] { color: var(--ink-faint); }
-        /* Colour is never the only signal — the words change too, and errors get a mark. */
-        .dot { width: 0.45rem; height: 0.45rem; border-radius: var(--r-round); background: var(--err); flex: none; }
+        .status[data-state='saved'], .status[data-state='clean'] { color: var(--ink-3); }
+        .status[data-state='saved'] :global(svg), .status[data-state='clean'] :global(svg) { color: var(--ok); }
+        .status[data-state='dirty'] { color: var(--ink-2); }
+        .status[data-state='error'] { color: var(--err); background: var(--err-bg); }
+        .spin {
+          width: 0.75rem; height: 0.75rem; border-radius: var(--r-round);
+          border: 1.5px solid var(--ink-3); border-right-color: transparent; animation: spin 700ms linear infinite;
+        }
+
+        .tools {
+          position: sticky; top: calc(3.5rem + env(safe-area-inset-top, 0px)); z-index: var(--z-sticky);
+          display: flex; justify-content: center; align-items: center; gap: 2px;
+          padding: var(--s-2) var(--s-4); box-shadow: 0 1px 0 var(--rule);
+          transition: opacity var(--dur-4) var(--ease-out);
+        }
+        .tw { display: inline-flex; align-items: center; }
+        .tools button {
+          display: grid; place-items: center; width: 2.25rem; height: 2.25rem; border-radius: var(--r-sm); border: 0;
+          background: none; color: var(--ink-2); cursor: pointer;
+          transition: color var(--dur-2), background-color var(--dur-2), transform var(--dur-1) var(--ease-spring);
+        }
+        .tools button:hover { color: var(--ink); background: var(--fill); }
+        .tools button:active { background: var(--fill-2); transform: scale(0.92); }
+        .sep { width: 1px; height: 1.1rem; background: var(--rule-strong); margin: 0 var(--s-3); }
+
+        /* Writing: the chrome steps back, never away — it's still there to find. */
+        .screen[data-typing] .bar, .screen[data-typing] .tools { opacity: 0.28; }
+        .screen[data-typing] .bar:focus-within, .screen[data-typing] .tools:focus-within { opacity: 1; }
 
         .sheet {
-          flex: 1; width: 100%; max-width: var(--measure);
-          margin-inline: auto;
-          padding: clamp(var(--s-6), 6vw, var(--s-8)) var(--s-5) 12rem;
+          flex: 1; width: 100%; max-width: calc(var(--measure) + 2 * var(--gutter));
+          margin-inline: auto; padding: clamp(var(--s-7), 7vw, var(--s-9)) var(--gutter) 12rem;
           display: flex; flex-direction: column;
         }
-        .num {
-          text-transform: uppercase; letter-spacing: 0.14em; font-size: 0.7rem;
-          color: var(--accent); margin: 0 0 var(--s-4);
-        }
+        .sheet .eyebrow { margin-bottom: var(--s-4); }
+        .of { color: var(--ink-3); font-weight: 500; letter-spacing: 0.08em; }
 
         /* Title and body are the page. No boxes, no rounded inputs — a border here
            would make writing a chapter feel like filling in a form. */
         .ctitle {
-          background: none; border: 0; outline: none; padding: 0; width: 100%;
-          color: var(--ink); font-family: var(--serif);
-          font-size: clamp(1.9rem, 1.3rem + 2.4vw, 2.7rem);
-          line-height: 1.08; letter-spacing: -0.022em; font-weight: 600;
+          background: none; border: 0; outline: none; padding: 0; width: 100%; margin: 0 0 var(--s-6);
+          color: var(--ink); font-family: var(--font-serif); font-weight: 500;
+          font-size: clamp(1.9rem, 1.3rem + 2.4vw, 2.75rem);
+          line-height: 1.1; letter-spacing: -0.022em; font-optical-sizing: auto;
         }
-        .ctitle::placeholder { color: var(--ink-faint); }
+        .ctitle::placeholder { color: var(--ink-4); }
         .ctitle:focus-visible { outline: none; }
-
-        .tools {
-          display: flex; align-items: center; gap: var(--s-1);
-          margin: var(--s-6) 0 var(--s-4);
-          padding-bottom: var(--s-3);
-          border-bottom: 1px solid var(--rule);
-        }
-        .tools button {
-          width: 2rem; height: 2rem; border-radius: var(--r-tight); border: 0;
-          background: none; color: var(--ink-dim); cursor: pointer;
-          font: inherit; font-size: 0.95rem; line-height: 1;
-          transition: color var(--quick), background-color var(--quick);
-        }
-        .tools button:hover { color: var(--ink); background: color-mix(in oklab, var(--ink) 8%, transparent); }
-        .tools button:active { background: color-mix(in oklab, var(--ink) 14%, transparent); }
-        .tools button:focus-visible { outline: var(--focus); outline-offset: -2px; }
-        .sep { width: 1px; height: 1.1rem; background: var(--rule); margin: 0 var(--s-2); }
-
         .cbody {
           background: none; border: 0; outline: none; padding: 0; width: 100%;
           resize: none; overflow: hidden;   /* it grows instead — the page scrolls */
-          color: var(--ink); font-family: var(--serif);
-          font-size: var(--prose); line-height: 1.7; letter-spacing: 0.001em;
-          min-height: 40vh;
+          color: var(--ink); font-family: var(--prose-font);
+          font-size: var(--prose); line-height: var(--prose-leading); letter-spacing: 0.002em;
+          min-height: 50vh;
         }
-        .cbody::placeholder { color: var(--ink-faint); }
+        .cbody::placeholder { color: var(--ink-4); }
+        .cbody:focus-visible { outline: none; }
+        .pv { margin: 0; max-width: none; }
 
-        .count { margin: var(--s-6) 0 0; color: var(--ink-faint); }
-        .danger-zone { margin-top: var(--s-8); padding-top: var(--s-5); border-top: 1px solid var(--rule); }
-        .danger { color: var(--err); }
-        .danger:hover { border-color: var(--err); background: var(--err-bg); }
+        .counts {
+          position: fixed; left: var(--s-5); bottom: max(var(--s-4), env(safe-area-inset-bottom)); z-index: var(--z-sticky);
+          display: flex; gap: var(--s-4); padding: var(--s-2) var(--s-4);
+          border-radius: var(--r-round); background: var(--chrome); color: var(--ink-3);
+          backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); box-shadow: 0 0 0 1px var(--rule);
+          font-size: var(--t-micro);
+        }
 
         @media (max-width: 40rem) {
-          .sheet { padding-bottom: 8rem; }
+          .bar { grid-template-columns: auto minmax(0, 1fr) auto; gap: var(--s-2); }
+          .picker { display: none; }
+          .status { justify-self: center; max-width: 100%; overflow: hidden; }
+          .st { overflow: hidden; text-overflow: ellipsis; }
+          .bar :global(.hide-sm) { display: none; }
+          .sheet { padding-bottom: 9rem; }
           /* Formatting moves to the thumb, and stays out of the prose. */
           .tools {
-            position: fixed; z-index: var(--z-nav); inset: auto 0 0 0;
-            margin: 0; border-bottom: 0;
-            justify-content: space-around;
-            padding: var(--s-2) var(--s-3) max(var(--s-2), env(safe-area-inset-bottom));
-            background: var(--chrome);
-            backdrop-filter: blur(24px) saturate(180%);
-            -webkit-backdrop-filter: blur(24px) saturate(180%);
-            box-shadow: 0 -1px 0 color-mix(in oklab, var(--ink) 10%, transparent);
+            position: fixed; top: auto; inset: auto 0 0 0; z-index: var(--z-nav);
+            justify-content: space-around; gap: 0;
+            padding: var(--s-1) var(--s-2) max(var(--s-1), env(safe-area-inset-bottom));
+            box-shadow: 0 -1px 0 var(--rule);
           }
-          .tools button { width: 2.75rem; height: 2.75rem; font-size: 1.05rem; }
+          .tools button { width: 2.75rem; height: 2.75rem; }
           .sep { display: none; }
+          .counts { left: 50%; transform: translateX(-50%); bottom: calc(3.6rem + env(safe-area-inset-bottom, 0px)); }
+          .counts span:nth-child(2) { display: none; }
         }
       `}</style>
     </div>

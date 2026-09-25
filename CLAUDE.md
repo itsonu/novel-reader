@@ -52,6 +52,7 @@ components/Toaster       toast() from anywhere, with Undo; survives navigation
 ### Routes (query params, because a static export can't prerender a folder imported later)
 
 ```
+/how-it-works                     the journey, step by step, in plain words (static)
 /library                          the shelf
 /novel?id=<id>                    a book, reading side: continue, contents, bookmarks
 /novel/chapters?id=<id>           the same book, writing side: order, drafts, duplicate, delete

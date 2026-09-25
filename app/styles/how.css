@@ -1,0 +1,173 @@
+/* ==========================================================================
+   How it works — the /how-it-works page and the home page's short version.
+   Global and prefixed (.hiw-): both are server components.
+   ========================================================================== */
+
+.hiwpage { max-width: 60rem; margin-inline: auto; padding: clamp(2.5rem, 7vw, 5rem) var(--gutter) 6rem; }
+.hiw-intro { max-width: 36rem; margin-bottom: clamp(3rem, 8vw, 5rem); }
+.hiw-intro .display { font-size: clamp(2.4rem, 1.6rem + 3vw, 3.6rem); }
+.hiw-intro .lede { margin-bottom: 0; }
+
+/* ---- the journey: numbered steps on one thread ---- */
+.hiw-steps { list-style: none; margin: 0; padding: 0; position: relative; }
+/* The thread that joins the numbers — the steps are one path, not five features. */
+.hiw-steps::before {
+  content: ''; position: absolute; left: 1.05rem; top: 1.2rem; bottom: 1.2rem; width: 1px;
+  background: linear-gradient(var(--rule-strong), var(--rule-strong) 85%, transparent);
+}
+.hiw-step + .hiw-step { margin-top: clamp(3rem, 8vw, 5rem); }
+.hiw-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: clamp(1.5rem, 5vw, 4rem); align-items: center;
+}
+.hiw-text { position: relative; padding-left: 3.5rem; }
+.hiw-n {
+  position: absolute; left: 0; top: -0.1rem;
+  display: grid; place-items: center; width: 2.1rem; height: 2.1rem; border-radius: var(--r-round);
+  background: var(--bg); border: 1px solid var(--rule-strong); color: var(--ink);
+  font-family: var(--font-serif); font-size: 1rem; font-weight: 500;
+}
+.hiw-h {
+  margin: 0 0 var(--s-3); font-family: var(--font-serif); font-weight: 500;
+  font-size: clamp(1.4rem, 1.15rem + 0.9vw, 1.8rem); line-height: 1.15; letter-spacing: -0.015em;
+}
+.hiw-p { margin: 0; color: var(--ink-2); font-size: 1.02rem; line-height: 1.65; max-width: 30rem; }
+.hiw-p code, .hiw-q code {
+  font-family: var(--font-mono); font-size: 0.88em; padding: 0.05em 0.35em;
+  background: var(--fill); border-radius: var(--r-xs); color: var(--ink);
+}
+.hiw-p b, .hiw-q b { color: var(--ink); font-weight: 600; }
+
+/* ---- pictures: small, quiet, made of the app's own surfaces ---- */
+.hiw-pic {
+  background: var(--surface); border: 1px solid var(--rule); border-radius: var(--r-lg);
+  padding: var(--s-5); font-size: var(--t-caption); color: var(--ink-2);
+  box-shadow: var(--shadow-1);
+}
+
+.hiw-folder { padding: 0; overflow: hidden; }
+.hiw-folder-bar {
+  display: flex; align-items: center; gap: var(--s-2); padding: var(--s-3) var(--s-4);
+  border-bottom: 1px solid var(--rule); color: var(--ink); font-weight: 600; background: var(--fill);
+}
+.hiw-folder ul { list-style: none; margin: 0; padding: var(--s-2) 0; }
+.hiw-folder li {
+  display: flex; align-items: center; gap: var(--s-3); padding: var(--s-2) var(--s-4);
+  font-family: var(--font-mono); font-size: 0.74rem; color: var(--ink);
+  white-space: nowrap; overflow: hidden;
+}
+.hiw-folder li span { overflow: hidden; text-overflow: ellipsis; }
+.hiw-folder li svg { flex: none; color: var(--ink-3); }
+/* Left out on import, and shown as left out. */
+.hiw-folder li[data-skip] { color: var(--ink-3); text-decoration: line-through; text-decoration-color: var(--ink-4); }
+
+.hiw-book { display: flex; gap: var(--s-5); align-items: center; }
+.hiw-book .cover { width: 5.5rem; }
+.hiw-book-meta { display: grid; gap: 0.2rem; min-width: 0; }
+.hiw-book-t { font-family: var(--font-serif); font-size: 1.15rem; color: var(--ink); line-height: 1.2; }
+.hiw-toc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
+.hiw-toc:first-of-type { margin-top: var(--s-2); }
+.hiw-toc b { display: inline-block; width: 1.1rem; color: var(--ink-3); font-weight: 500; }
+
+.hiw-page { padding: var(--s-4) var(--s-6) var(--s-6); background: var(--bg); }
+.hiw-page-bar {
+  display: flex; align-items: center; gap: var(--s-4); justify-content: flex-end;
+  padding-bottom: var(--s-3); margin-bottom: var(--s-4); border-bottom: 1px solid var(--rule);
+}
+.hiw-aa { font-family: var(--font-serif); font-size: 0.95rem; color: var(--ink); margin-right: auto; }
+.hiw-sizes { display: flex; align-items: baseline; gap: var(--s-2); font-family: var(--font-serif); color: var(--ink); }
+.hiw-sizes .big { font-size: 1.1rem; }
+.hiw-modes { display: flex; gap: var(--s-2); color: var(--ink-2); }
+.hiw-page-h { margin: 0 0 var(--s-3); font-family: var(--font-serif); font-size: 1.2rem; color: var(--ink); text-align: center; }
+.hiw-page-p { margin: 0; font-family: var(--font-serif); font-size: 0.98rem; line-height: 1.65; color: var(--ink); }
+
+.hiw-voice-line { margin: 0 0 var(--s-5); font-family: var(--font-serif); font-size: 1.12rem; line-height: 1.7; color: var(--ink); }
+.hiw-w { border-radius: 0.18em; }
+.hiw-w + .hiw-w { margin-left: 0.28em; }
+/* Still frame: one word lit — the idea, even with no motion at all. */
+.hiw-w:nth-child(3) { background: var(--mark); box-shadow: 0 0 0 0.14em var(--mark); }
+@keyframes hiw-speak {
+  0%, 100% { background: transparent; box-shadow: none; }
+  4%, 11% { background: var(--mark); box-shadow: 0 0 0 0.14em var(--mark); }
+  15% { background: transparent; box-shadow: none; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  /* Walk the sentence a few times once it's on screen, then rest. */
+  [data-shown='true'] .hiw-w { background: transparent; box-shadow: none; animation: hiw-speak 4.8s linear calc(0.2s + var(--i) * 0.42s) 3 both; }
+  [data-shown='true'] .hiw-track span { animation: hiw-track 4.8s linear 0.2s 3 both; }
+}
+@keyframes hiw-track { from { transform: scaleX(0.08); } to { transform: scaleX(1); } }
+.hiw-transport { display: flex; align-items: center; gap: var(--s-4); }
+.hiw-play {
+  flex: none; display: grid; place-items: center; width: 2.25rem; height: 2.25rem; border-radius: var(--r-round);
+  background: var(--ink); color: var(--bg);
+}
+.hiw-play svg { margin-left: 2px; }
+.hiw-track { flex: 1; height: 3px; border-radius: var(--r-round); background: var(--fill-2); overflow: hidden; }
+.hiw-track span { display: block; height: 100%; background: var(--accent); transform-origin: left; transform: scaleX(0.35); }
+.hiw-time { font-variant-numeric: tabular-nums; color: var(--ink-3); }
+
+.hiw-resume { display: grid; gap: 0.2rem; }
+.hiw-resume-k { font-size: var(--t-micro); font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent); }
+.hiw-resume-t { font-family: var(--font-serif); font-size: 1.25rem; color: var(--ink); line-height: 1.2; margin-top: var(--s-1); }
+.hiw-resume-m { display: block; height: 3px; margin: var(--s-3) 0 var(--s-2); border-radius: var(--r-round); background: var(--fill-2); overflow: hidden; }
+.hiw-resume-m span { display: block; width: 45%; height: 100%; background: var(--accent); }
+.hiw-resume-f { display: inline-flex; align-items: center; gap: var(--s-2); color: var(--ink-3); }
+.hiw-resume-f svg { color: var(--accent); }
+
+/* ---- the writer's aside ---- */
+.hiw-writer {
+  display: flex; gap: var(--s-5); align-items: flex-start;
+  margin: clamp(3.5rem, 9vw, 5.5rem) 0 0; padding: var(--s-6);
+  border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule);
+}
+.hiw-writer > svg { flex: none; color: var(--accent); margin-top: 0.15rem; }
+.hiw-writer h2 { margin: 0 0 var(--s-2); }
+.hiw-writer p { margin: 0; color: var(--ink-2); line-height: 1.6; max-width: 38rem; }
+
+/* ---- questions: native disclosure, the most familiar pattern there is ---- */
+.hiw-faq { margin-top: clamp(3.5rem, 9vw, 5.5rem); }
+.hiw-faq > h2 { margin-bottom: var(--s-5); }
+.hiw-qs { border-top: 1px solid var(--rule); }
+.hiw-q { border-bottom: 1px solid var(--rule); }
+.hiw-q summary {
+  list-style: none; display: flex; align-items: center; justify-content: space-between; gap: var(--s-4);
+  min-height: 3.5rem; padding: var(--s-3) var(--s-2); cursor: pointer;
+  font-size: var(--t-body); font-weight: 500; color: var(--ink);
+  border-radius: var(--r-sm); transition: background-color var(--dur-2);
+}
+.hiw-q summary::-webkit-details-marker { display: none; }
+.hiw-q summary:hover { background: var(--fill); }
+.hiw-q summary svg { flex: none; color: var(--ink-3); transition: transform var(--dur-3) var(--ease-spring); }
+.hiw-q[open] summary svg { transform: rotate(180deg); }
+.hiw-q p { margin: 0; padding: 0 var(--s-2) var(--s-5); color: var(--ink-2); line-height: 1.65; max-width: 40rem; }
+.hiw-q[open] p { animation: hiw-open var(--dur-3) var(--ease-out); }
+@keyframes hiw-open { from { opacity: 0; transform: translate3d(0, -4px, 0); } }
+
+.hiw-end { margin-top: clamp(3.5rem, 9vw, 5rem); text-align: center; display: grid; gap: var(--s-5); justify-items: center; }
+.hiw-end h2 { margin: 0; }
+
+/* ---- home page: the short version ---- */
+.hiw-summary { max-width: 62rem; margin-inline: auto; padding: clamp(3rem, 8vw, 5rem) 1.5rem; scroll-margin-top: 4rem; }
+.hiw-sum-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s-4); flex-wrap: wrap; margin-bottom: var(--s-6); }
+.hiw-sum-head .section-h { margin: 0; }
+.hiw-sum-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s-6); }
+.hiw-sum-list li { padding-top: var(--s-4); border-top: 1px solid var(--rule-strong); }
+.hiw-sum-n {
+  /* In flow, not pinned to the rule: Reveal's will-change makes it the containing
+     block, so an absolute number lands on the title instead of the line. */
+  display: block; margin-bottom: var(--s-3);
+  font-family: var(--font-serif); font-size: 1rem; color: var(--ink-3);
+}
+.hiw-sum-t { margin: 0 0 var(--s-2); font-family: var(--font-serif); font-weight: 500; font-size: 1.2rem; line-height: 1.25; letter-spacing: -0.01em; }
+.hiw-sum-d { margin: 0; color: var(--ink-2); line-height: 1.55; font-size: 0.98rem; }
+
+@media (max-width: 48rem) {
+  .hiw-row { grid-template-columns: minmax(0, 1fr); gap: var(--s-5); }
+  .hiw-row > .hiw-pic { margin-left: 3.5rem; }
+  .hiw-sum-list { grid-template-columns: minmax(0, 1fr); gap: var(--s-7); }
+}
+@media (max-width: 26rem) {
+  .hiw-row > .hiw-pic { margin-left: 0; }
+  .hiw-writer { padding: var(--s-5) 0; }
+}

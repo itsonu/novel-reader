@@ -318,6 +318,25 @@ await group('library', async p => {
   ok(await p.evaluate(() => document.activeElement?.className) === 'skip', 'first Tab is the skip link');
 });
 
+/* ======================= how it works ======================= */
+await group('how-it-works', async p => {
+  await p.goto(B + '/');
+  await p.click('.hiw-summary a:has-text("The whole journey")'); await p.waitForURL(/how-it-works/);
+  ok(true, 'home “How it works” section links to the page');
+  ok(await p.locator('.hiw-step').count() === 5, 'the page walks through five steps');
+  ok(await p.evaluate(() => [...document.querySelectorAll('.hiw-n')].map(n => n.textContent).join('') === '12345'), 'steps are numbered in order');
+  const q = p.locator('.hiw-q').nth(0);
+  await q.locator('summary').click();
+  ok(await q.evaluate(d => d.open) && /account/i.test(await q.textContent()), 'questions open on click');
+  await p.keyboard.press('Enter');
+  ok(!(await q.evaluate(d => d.open)), 'and close from the keyboard');
+  await p.click('a:has-text("Try the sample book")'); await p.waitForURL(/\/read\//); await p.waitForSelector('.prose .w');
+  ok(true, '“Try the sample book” opens a chapter');
+  await p.goto(B + '/');
+  await p.click('.hero-wrap a:has-text("How it works")'); await p.waitForURL(/how-it-works/);
+  ok(true, 'hero “How it works” goes to the page');
+});
+
 /* ======================= mobile ======================= */
 for (const scheme of ['dark', 'light']) {
   await group(`mobile-${scheme}`, async p => {
@@ -356,7 +375,7 @@ for (const mobile of [false, true]) for (const scheme of ['dark', 'light']) {
   await group(`overflow-${mobile ? 'm' : 'd'}-${scheme}`, async p => {
     const bad = [];
     for (const r of ['/', '/library/', '/library/?tab=bookmarks', '/library/?tab=history', `/novel/?id=${ID}`, `/novel/chapters/?id=${ID}`,
-      `/write/?novel=${ID}&chapter=forty-one`, `/write/?novel=${ID}&chapter=new`, `/read/?novel=${ID}&chapter=forty-one`, '/publish/', '/nope/']) {
+      `/write/?novel=${ID}&chapter=forty-one`, `/write/?novel=${ID}&chapter=new`, `/read/?novel=${ID}&chapter=forty-one`, '/publish/', '/how-it-works/', '/nope/']) {
       await p.goto(B + r); await p.waitForTimeout(500);
       const o = await overflow(p);
       if (o > 0) bad.push(`${r} +${o}px`);

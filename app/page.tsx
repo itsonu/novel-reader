@@ -5,6 +5,7 @@ import SampleLine from '@/components/SampleLine';
 import SpokenProse from '@/components/SpokenProse';
 import ResumeLink from '@/components/ResumeLink';
 import Cover from '@/components/Cover';
+import { HowItWorksSummary } from '@/components/HowItWorks';
 
 export const revalidate = 300;
 
@@ -55,7 +56,7 @@ export default async function Home() {
             <div className="cta">
               {/* Turns into "Continue <book>" once there's something to continue. */}
               <ResumeLink />
-              <Link href="/#how" className="btn" data-size="lg">How it works</Link>
+              <Link href="/how-it-works" className="btn" data-size="lg">How it works</Link>
             </div>
           </Reveal>
 
@@ -65,8 +66,11 @@ export default async function Home() {
           </Reveal>
         </section>
 
-        {/* What it does, read rather than listed: scrolling narrates it. */}
-        <section id="how" className="rail">
+        {/* The process in three lines, with the way to the whole story. */}
+        <HowItWorksSummary />
+
+        {/* What it feels like, read rather than listed: scrolling narrates it. */}
+        <section className="rail">
           <SpokenProse />
         </section>
 
@@ -111,7 +115,7 @@ export default async function Home() {
           <Link href="/">Discover</Link>
           <Link href="/library">Library</Link>
           <Link href="/publish">Add a novel</Link>
-          <Link href="/#how">How it works</Link>
+          <Link href="/how-it-works">How it works</Link>
         </nav>
       </footer>
     </>

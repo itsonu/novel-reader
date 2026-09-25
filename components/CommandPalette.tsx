@@ -78,6 +78,7 @@ export default function CommandPalette({ open, onClose }: { open: boolean; onClo
       { id: 'g:fav', group: 'Go to', label: 'Favourites', icon: 'star', run: () => go(libraryTabHref('favorites')) },
       { id: 'g:marks', group: 'Go to', label: 'Bookmarks', icon: 'bookmark', run: () => go(libraryTabHref('bookmarks')) },
       { id: 'g:hist', group: 'Go to', label: 'Reading history', icon: 'clock', run: () => go(libraryTabHref('history')) },
+      { id: 'g:how', group: 'Go to', label: 'How it works', icon: 'info', run: () => go('/how-it-works'), keywords: 'help guide start explain' },
       { id: 'g:add', group: 'Go to', label: 'Add a novel', icon: 'plus', run: () => go(PUBLISH), keywords: 'import folder upload publish' },
       { id: 't:light', group: 'Appearance', label: 'Light appearance', icon: 'sun', run: () => { setThemePref('light'); onClose(); }, keywords: 'theme' },
       { id: 't:dark', group: 'Appearance', label: 'Dark appearance', icon: 'moon', run: () => { setThemePref('dark'); onClose(); }, keywords: 'theme' },

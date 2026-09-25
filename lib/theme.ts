@@ -16,7 +16,7 @@ const KEY = 'nr:theme';
 const EVENT = 'nr:theme';
 const QUERY = '(prefers-color-scheme: light)';
 /** Browser chrome colour per theme — matches --bg in tokens.css. */
-export const THEME_COLOR: Record<Theme, string> = { light: '#f8f4ed', dark: '#121110' };
+export const THEME_COLOR: Record<Theme, string> = { light: '#f5f0e6', dark: '#1c1a17' };
 
 export function getThemePref(): ThemePref {
   if (typeof window === 'undefined') return 'system';

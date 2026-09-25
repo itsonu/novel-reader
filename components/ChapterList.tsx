@@ -111,7 +111,7 @@ export default function ChapterList({
 
   return (
     <div className="chlist" data-variant={variant} ref={list}>
-      {(rows.length > SEARCH_AFTER || !compact) && (
+      {(rows.length > SEARCH_AFTER || (!compact && (current > 0 || Boolean(marked?.size)))) && (
         <div className="tools">
           {rows.length > SEARCH_AFTER && (
             <label className="search">
@@ -132,7 +132,7 @@ export default function ChapterList({
               ))}
             </div>
           )}
-          {!compact && rows.length > 1 && (
+          {!compact && rows.length > SEARCH_AFTER && (
             <button
               className="btn sortbtn" data-variant="ghost" data-size="sm"
               onClick={() => setDesc(d => !d)} title="Reverse the order"
@@ -182,7 +182,8 @@ export default function ChapterList({
           content-visibility: auto; contain-intrinsic-size: auto 3.25rem;
           border-radius: var(--r-sm);
         }
-        .chlist[data-variant='full'] .row + .row { box-shadow: 0 -1px 0 var(--rule); }
+        .chlist[data-variant='full'] .rows { border-top: 1px solid var(--rule); }
+        .chlist[data-variant='full'] .row { border-bottom: 1px solid var(--rule); border-radius: 0; }
         .chlist .row .main {
           flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--s-4);
           min-height: 3.25rem; padding: var(--s-2) var(--s-3);

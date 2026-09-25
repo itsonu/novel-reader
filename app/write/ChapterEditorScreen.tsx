@@ -1,32 +1,31 @@
 'use client';
-// The chapter editor. One screen, two jobs — writing a new chapter and rewriting an
-// existing one — because they are the same act with different starting text.
+// The chapter editor: a page of the book with a pen in it.
 //
-// Writing wants the whole window and the page's own scrollbar, not a panel with an
-// inner one: the body textarea grows to fit its content and the *page* scrolls.
+// A route, not a panel — `/write?novel=<id>&chapter=<slug|new>` — so back, forward,
+// refresh and a link to "the chapter I was writing" all behave. It shares the reader's
+// type, measure and palette; only the chrome differs, and the chrome is kept to one bar
+// on top (where am I, formatting, save, done) and one quiet line at the foot (where the
+// neighbouring chapters are, how long this one is). While you type, both step back.
 //
-// Controls live in the chrome — the bar at the top, the formatting strip (at the thumb
-// on a phone) — and the page is only title and text. While you type, the chrome dims;
-// move the pointer and it's back.
-//
-// Saving is automatic. Done is a way out, not the thing that keeps the work.
+// Saving is automatic, and nothing typed is left behind by any way of leaving: the idle
+// timer, the explicit Save, the chapter switcher, Done, the browser's own Back button
+// (a pending save is flushed as the page goes), a tab close (the browser asks).
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import Icon, { type IconName } from '@/components/Icon';
-import Menu from '@/components/Menu';
+import Menu, { type MenuItem } from '@/components/Menu';
 import Shortcuts from '@/components/Shortcuts';
 import { toast } from '@/components/Toaster';
 import { getNovel, notifyChanged, putNovel, type StoredNovel } from '@/lib/library';
 import {
-  chapterLabel, countWords, draftSlug, orderedChapters, readingMinutes,
-  removeChapter, upsertChapter
+  countWords, draftSlug, orderedChapters, readingMinutes, removeChapter, upsertChapter
 } from '@/lib/chapters';
 import { md } from '@/lib/reader/markdown';
-import { NEW_CHAPTER, chapterEditHref, localChapterHref, localNovelHref } from '@/lib/routes';
-import { isMac } from '@/lib/ui';
+import { NEW_CHAPTER, chapterEditHref, chaptersHref, localChapterHref } from '@/lib/routes';
+import { isMac, isTyping } from '@/lib/ui';
 
 type Status = 'clean' | 'dirty' | 'saving' | 'saved' | 'error';
 
@@ -36,11 +35,11 @@ const IDLE_MS = 900;
 
 function savedAgo(at: number, now: number): string {
   const s = Math.round((now - at) / 1000);
-  if (s < 5) return 'Saved';
-  if (s < 60) return `Saved ${s}s ago`;
+  if (s < 10) return 'Saved';
+  if (s < 60) return 'Saved just now';
   const m = Math.round(s / 60);
   if (m < 60) return `Saved ${m} min ago`;
-  return `Saved at ${new Date(at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+  return `Saved ${new Date(at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
 }
 
 export default function ChapterEditorScreen() {
@@ -49,30 +48,39 @@ export default function ChapterEditorScreen() {
   const novelId = params.get('novel') ?? '';
   const param = params.get('chapter') ?? NEW_CHAPTER;
 
-  const [novel, setNovel] = useState<StoredNovel | null>(null);
+  const [novel, setNovelState] = useState<StoredNovel | null>(null);
   const [phase, setPhase] = useState<'loading' | 'ready' | 'missing'>('loading');
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
+  const [draft, setDraftFlag] = useState(false);
   const [status, setStatus] = useState<Status>('clean');
   const [savedAt, setSavedAt] = useState(0);
   const [now, setNow] = useState(0);
   const [ask, setAsk] = useState<null | { kind: 'leave'; to: string } | { kind: 'delete' }>(null);
   const [preview, setPreview] = useState(false);
   const [typing, setTyping] = useState(false);
+  const [focus, setFocus] = useState(false);
   const [keys, setKeys] = useState(false);
   const [mac, setMac] = useState(true);
 
   const area = useRef<HTMLTextAreaElement>(null);
+  const titleEl = useRef<HTMLInputElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** The slug this draft settled on. A new chapter has none until its first save, and
    *  once it has one it never changes — that slug is the chapter's URL. */
   const slug = useRef(param === NEW_CHAPTER ? '' : param);
-  const latest = useRef({ title: '', body: '' });
-  latest.current = { title, body };
+  const latest = useRef({ title: '', body: '', draft: false });
+  latest.current = { title, body, draft };
+  /** The novel as last written. A save reads this, not render state: two saves close
+   *  together must each build on the other's result, not on the same stale copy. */
+  const novelRef = useRef<StoredNovel | null>(null);
+  const setNovel = (n: StoredNovel) => { novelRef.current = n; setNovelState(n); };
   /** Bumped on every edit. A save that finishes after a newer keystroke must not
    *  report "Saved" — that would clear the dirty flag and the autosave would never
    *  fire again, so the last thing typed would be the one thing lost. */
   const rev = useRef(0);
+  const statusRef = useRef<Status>('clean');
+  statusRef.current = status;
 
   useEffect(() => setMac(isMac()), []);
 
@@ -82,23 +90,30 @@ export default function ChapterEditorScreen() {
      would overwrite anything typed while the save was in flight. */
   useEffect(() => {
     if (!novelId) { setPhase('missing'); return; }
-    if (param !== NEW_CHAPTER && param === slug.current && novel?.id === novelId && phase === 'ready') return;
+    if (param !== NEW_CHAPTER && param === slug.current && novelRef.current?.id === novelId && phase === 'ready') return;
     let live = true;
     (async () => {
       try {
+        // Arriving from another chapter in this same editor (Back/Forward, the switcher)
+        // leaves this component mounted. Anything still pending belongs to the chapter
+        // we're leaving: save it *before* slug and text switch over, or it's dropped —
+        // or worse, an idle timer firing mid-switch writes it into the new chapter.
+        if (timer.current) { clearTimeout(timer.current); timer.current = null; }
+        if (statusRef.current === 'dirty' || statusRef.current === 'saving') await saveRef.current();
+        if (!live) return;
         const n = await getNovel(novelId);
         if (!live) return;
         if (!n) { setPhase('missing'); return; }
         setNovel(n);
         if (param === NEW_CHAPTER) {
-          slug.current = ''; setTitle(''); setBody('');
+          slug.current = ''; setTitle(''); setBody(''); setDraftFlag(false);
         } else {
           const c = n.chapters.find(x => x.slug === param);
           if (!c) { setPhase('missing'); return; }
-          slug.current = c.slug; setTitle(c.title); setBody(c.body);
+          slug.current = c.slug; setTitle(c.title); setBody(c.body); setDraftFlag(Boolean(c.draft));
         }
         rev.current = 0;
-        setStatus('clean'); setPreview(false);
+        setStatus('clean'); setPreview(false); setSavedAt(0);
         setPhase('ready');
         window.scrollTo(0, 0);
       } catch { if (live) setPhase('missing'); }
@@ -107,11 +122,22 @@ export default function ChapterEditorScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [novelId, param]);
 
+  /* A blank chapter starts in its title; an existing one starts in its text. Done after
+     the page is on screen — autoFocus on mount loses to the link that brought us here. */
+  useEffect(() => {
+    if (phase !== 'ready') return;
+    const id = requestAnimationFrame(() => {
+      if (document.activeElement && document.activeElement !== document.body && document.activeElement.closest('.sheet')) return;
+      if (!slug.current) titleEl.current?.focus();
+    });
+    return () => cancelAnimationFrame(id);
+  }, [phase, param]);
+
   /* ---- save ---- */
   const save = useCallback(async (): Promise<boolean> => {
-    const base = novel;
+    const base = novelRef.current;
     if (!base) return false;
-    const { title: t, body: b } = latest.current;
+    const { title: t, body: b, draft: d } = latest.current;
     // Never create a row for a chapter nobody has written yet — an accidental visit to
     // the editor should leave no trace in the novel.
     if (!slug.current && !t.trim() && !b.trim()) { setStatus('clean'); return true; }
@@ -121,7 +147,7 @@ export default function ChapterEditorScreen() {
     const isNew = !slug.current;
     if (isNew) slug.current = draftSlug(t, base.chapters.map(c => c.slug), Date.now());
 
-    const next = upsertChapter(base, { slug: slug.current, title: t, body: b });
+    const next = upsertChapter(base, { slug: slug.current, title: t, body: b, draft: d });
     try {
       await putNovel(next);
       setNovel(next);
@@ -138,7 +164,9 @@ export default function ChapterEditorScreen() {
       setStatus('error');
       return false;
     }
-  }, [novel, router]);
+  }, [router]);
+  const saveRef = useRef(save);
+  saveRef.current = save;
 
   /* Autosave on idle. */
   useEffect(() => {
@@ -146,6 +174,21 @@ export default function ChapterEditorScreen() {
     timer.current = setTimeout(() => void save(), IDLE_MS);
     return () => { if (timer.current) clearTimeout(timer.current); };
   }, [status, save]);
+
+  /* Leaving by any door the app doesn't own — the browser's Back, a closed tab going to
+     the background, a route change from the command palette — still keeps the words.
+     IndexedDB writes outlive the component, so a fire-and-forget save is enough. */
+  useEffect(() => {
+    const flush = () => { if (statusRef.current === 'dirty') void saveRef.current(); };
+    const onHide = () => { if (document.visibilityState === 'hidden') flush(); };
+    window.addEventListener('pagehide', flush);
+    document.addEventListener('visibilitychange', onHide);
+    return () => {
+      window.removeEventListener('pagehide', flush);
+      document.removeEventListener('visibilitychange', onHide);
+      flush();
+    };
+  }, []);
 
   /* Last line of defence: a reload or tab close while a save is still pending. */
   useEffect(() => {
@@ -156,20 +199,36 @@ export default function ChapterEditorScreen() {
     return () => window.removeEventListener('beforeunload', warn);
   }, [status]);
 
-  /* Tick only while there is a timestamp on screen to age. */
+  /* Age the timestamp only while one is on screen. */
   useEffect(() => {
     if (status !== 'saved') return;
     const t = setInterval(() => setNow(Date.now()), 15000);
     return () => clearInterval(t);
   }, [status]);
 
-  /* Chrome dims while typing, and comes back the moment the pointer moves. */
+  /* Chrome steps back while typing; the pointer brings it home. */
   useEffect(() => {
     if (!typing) return;
     const wake = () => setTyping(false);
     window.addEventListener('pointermove', wake, { once: true });
     return () => window.removeEventListener('pointermove', wake);
   }, [typing]);
+
+  /* Focus mode: fullscreen where allowed; leaving fullscreen by Esc leaves the mode. */
+  const toggleFocus = useCallback(async () => {
+    const on = !focus;
+    setFocus(on);
+    try {
+      if (on && document.fullscreenEnabled && !document.fullscreenElement) await document.documentElement.requestFullscreen();
+      if (!on && document.fullscreenElement) await document.exitFullscreen();
+    } catch { /* refused: the mode still clears the chrome */ }
+    area.current?.focus();
+  }, [focus]);
+  useEffect(() => {
+    const on = () => { if (!document.fullscreenElement) setFocus(false); };
+    document.addEventListener('fullscreenchange', on);
+    return () => document.removeEventListener('fullscreenchange', on);
+  }, []);
 
   const edit = (fn: () => void) => { fn(); rev.current += 1; setStatus('dirty'); };
 
@@ -220,16 +279,22 @@ export default function ChapterEditorScreen() {
     setBody(el.value);
   };
 
+  /** A scene break sits on its own line with a blank line either side, wherever the
+   *  cursor was — so it can't glue itself onto the end of a paragraph. */
   const sceneBreak = () => {
     const el = area.current;
     if (!el) return;
     el.focus();
-    document.execCommand('insertText', false, '\n\n* * *\n\n');
+    const v = el.value, at = el.selectionStart;
+    const before = v.slice(0, at).replace(/\s*$/, '');
+    const lead = before ? '\n\n' : '';
+    el.setSelectionRange(before.length, el.selectionEnd);
+    document.execCommand('insertText', false, `${lead}* * *\n\n`);
     setBody(el.value);
   };
 
   /* ---- leaving / moving between chapters ---- */
-  const back = localNovelHref(novelId);
+  const back = chaptersHref(novelId);
 
   const leave = useCallback(async (to: string) => {
     if (timer.current) clearTimeout(timer.current);
@@ -246,27 +311,41 @@ export default function ChapterEditorScreen() {
   }, [status, save, router]);
 
   const chapters = novel ? orderedChapters(novel) : [];
-  const index = slug.current ? chapters.findIndex(c => c.slug === slug.current) : -1;
-  const number = index >= 0 ? index : chapters.length;
+  // Position comes from the URL, which is right the instant a navigation starts — the
+  // loaded slug lags until the next chapter arrives, and a second Alt+↓ pressed in that
+  // gap would otherwise step from the chapter being left rather than the one arriving.
+  const here = param !== NEW_CHAPTER ? param : slug.current;
+  const index = here ? chapters.findIndex(c => c.slug === here) : -1;
+  const position = index >= 0 ? index : chapters.length;          // 0-based
+  const total = index >= 0 ? chapters.length : chapters.length + 1;
   const prevCh = index > 0 ? chapters[index - 1] : index < 0 ? chapters[chapters.length - 1] : undefined;
   const nextCh = index >= 0 ? chapters[index + 1] : undefined;
+  const goPrev = () => { if (prevCh) void leave(chapterEditHref(novelId, prevCh.slug)); };
+  const goNext = () => void leave(chapterEditHref(novelId, nextCh?.slug ?? NEW_CHAPTER));
 
-  /* ---- keyboard ---- */
+  /* ---- keyboard ----
+     Escape steps out of a mode (preview, focus) and never out of the page: a key that
+     sits next to the one you meant should not be able to close your chapter. */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (document.querySelector('[aria-modal="true"]')) return;
       const meta = e.metaKey || e.ctrlKey;
       const k = e.key.toLowerCase();
       if (meta && k === 's') { e.preventDefault(); void save(); return; }
-      if (meta && k === 'b') { e.preventDefault(); edit(() => wrap('**')); return; }
-      if (meta && k === 'i') { e.preventDefault(); edit(() => wrap('*')); return; }
-      if (meta && k === 'k') { e.preventDefault(); edit(link); return; }
+      if (meta && k === 'b' && !preview) { e.preventDefault(); edit(() => wrap('**')); return; }
+      if (meta && k === 'i' && !preview) { e.preventDefault(); edit(() => wrap('*')); return; }
+      if (meta && k === 'k' && !preview) { e.preventDefault(); edit(link); return; }
       if (meta && e.key === 'Enter') { e.preventDefault(); void leave(back); return; }
-      if (e.altKey && k === 'p') { e.preventDefault(); setPreview(p => !p); return; }
-      if (e.altKey && e.key === 'ArrowUp' && prevCh) { e.preventDefault(); void leave(chapterEditHref(novelId, prevCh.slug)); return; }
-      if (e.altKey && e.key === 'ArrowDown') { e.preventDefault(); void leave(chapterEditHref(novelId, nextCh?.slug ?? NEW_CHAPTER)); return; }
-      if (e.key === 'Escape') { e.preventDefault(); if (preview) setPreview(false); else void leave(back); return; }
-      if (e.key === '?' && !(e.target as HTMLElement).matches('input, textarea')) { e.preventDefault(); setKeys(true); }
+      if (e.altKey && (e.code === 'KeyP' || k === 'p')) { e.preventDefault(); setPreview(p => !p); return; }
+      if (e.altKey && (e.code === 'KeyF' || k === 'f')) { e.preventDefault(); void toggleFocus(); return; }
+      if (e.altKey && e.key === 'ArrowUp') { e.preventDefault(); goPrev(); return; }
+      if (e.altKey && e.key === 'ArrowDown') { e.preventDefault(); goNext(); return; }
+      if (e.key === 'Escape') {
+        if (preview) { e.preventDefault(); setPreview(false); }
+        else if (focus && !document.fullscreenElement) { e.preventDefault(); setFocus(false); }
+        return;
+      }
+      if (e.key === '?' && !isTyping(e)) { e.preventDefault(); setKeys(true); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -305,104 +384,138 @@ export default function ChapterEditorScreen() {
           <h1 className="title">That chapter isn’t here</h1>
           <p>It may have been deleted, or the link may point at a book that isn’t on this device.</p>
           <div className="actions">
-            <Link href="/library" className="btn" data-variant="primary">Go to your library</Link>
+            {novelId && <Link href={chaptersHref(novelId)} className="btn" data-variant="primary">Back to the chapters</Link>}
+            <Link href="/library" className="btn">Your library</Link>
           </div>
         </div>
       </main>
     );
 
-  const statusText =
+  /* One control for both save state and the manual save: it says what's true, and when
+     there is something to save, pressing it saves. */
+  const saveLabel =
     status === 'saving' ? 'Saving…'
-    : status === 'error' ? 'Not saved'
-    : status === 'dirty' ? 'Edited'
+    : status === 'error' ? 'Retry save'
+    : status === 'dirty' ? 'Save'
     : status === 'saved' ? savedAgo(savedAt, now)
-    : slug.current ? 'Saved' : 'Draft';
-  const statusIcon: IconName | null = status === 'error' ? 'alert' : status === 'saved' || (status === 'clean' && slug.current) ? 'check' : null;
+    : slug.current ? 'Saved' : 'Not saved yet';
+  const saveIcon: IconName | null = status === 'error' ? 'alert' : status === 'saved' || (status === 'clean' && slug.current) ? 'check' : null;
   const mod = mac ? '⌘' : 'Ctrl';
   const alt = mac ? '⌥' : 'Alt';
+  const shownTitle = title.trim() || 'Untitled';
 
-  const tools: { icon: IconName; label: string; key?: string; run: () => void }[] = [
+  const tools: { icon?: IconName; text?: string; label: string; key?: string; run: () => void }[] = [
     { icon: 'bold', label: 'Bold', key: `${mod} B`, run: () => edit(() => wrap('**')) },
     { icon: 'italic', label: 'Italic', key: `${mod} I`, run: () => edit(() => wrap('*')) },
     { icon: 'heading', label: 'Heading', run: () => edit(() => prefixLines('## ')) },
-    { icon: 'quote', label: 'Quote', run: () => edit(() => prefixLines('> ')) },
+    { icon: 'quote', label: 'Quotation', run: () => edit(() => prefixLines('> ')) },
     { icon: 'bullets', label: 'List', run: () => edit(() => prefixLines('- ')) },
     { icon: 'link', label: 'Link', key: `${mod} K`, run: () => edit(link) },
-    { icon: 'scene', label: 'Scene break', run: () => edit(sceneBreak) }
+    { text: '* * *', label: 'Scene break', run: () => edit(sceneBreak) }
+  ];
+
+  const switcher: MenuItem[] = [
+    ...chapters.map((c, i) => ({
+      label: `${i + 1}. ${c.title}${c.draft ? ' — draft' : ''}`,
+      checked: c.slug === slug.current,
+      onSelect: () => { if (c.slug !== slug.current) void leave(chapterEditHref(novelId, c.slug)); }
+    })),
+    ...(slug.current ? ['sep' as const, { label: 'New chapter', icon: 'plus' as const, onSelect: () => void leave(chapterEditHref(novelId, NEW_CHAPTER)) }] : [])
+  ];
+
+  const more: MenuItem[] = [
+    ...(slug.current && !draft ? [{ label: 'Read this chapter', icon: 'book' as const, onSelect: () => void leave(localChapterHref(novelId, slug.current)) }] : []),
+    { label: preview ? 'Back to writing' : 'Preview', icon: preview ? 'pen' : 'eye', hint: `${alt} P`, onSelect: () => setPreview(p => !p) },
+    { label: focus ? 'Leave focus mode' : 'Focus mode', icon: focus ? 'collapse' : 'expand', hint: `${alt} F`, onSelect: () => void toggleFocus() },
+    { label: 'Keyboard shortcuts', icon: 'keyboard', hint: '?', onSelect: () => setKeys(true) },
+    ...(slug.current ? ['sep' as const, { label: 'Delete chapter', icon: 'trash' as const, tone: 'danger' as const, onSelect: () => setAsk({ kind: 'delete' }) }] : [])
   ];
 
   return (
-    <div className="screen" data-editor data-typing={typing || undefined}>
-      <header className="bar chrome">
-        <div className="l">
-          <button className="icon-btn" onClick={() => void leave(back)} aria-label={`Back to ${novel.title}`} title={novel.title}>
+    <div className="screen" data-editor data-typing={typing || undefined} data-focus={focus || undefined}>
+      {/* Solid, not frosted: a backdrop-filter here would become the containing block of
+          the phone's fixed formatting strip and pin it to the top of the screen. */}
+      <header className="bar">
+        <div className="where">
+          <button className="icon-btn" onClick={() => void leave(back)} aria-label={`Back to the chapters of ${novel.title}`} title="Back to chapters">
             <Icon name="back" />
           </button>
-          <label className="picker">
-            <span className="sr-only">Chapter</span>
-            <select
-              className="select"
-              value={slug.current || NEW_CHAPTER}
-              onChange={e => void leave(chapterEditHref(novelId, e.target.value))}
-            >
-              {chapters.map((c, i) => <option key={c.slug} value={c.slug}>{i + 1}. {c.title}</option>)}
-              {!slug.current && <option value={NEW_CHAPTER}>{chapters.length + 1}. {title.trim() || 'New chapter'}</option>}
-              {slug.current && <option value={NEW_CHAPTER}>＋ New chapter</option>}
-            </select>
-          </label>
+          <div className="crumb">
+            <span className="book">{novel.title}</span>
+            <Menu
+              label="Switch chapter"
+              placement="bottom-start"
+              className="switch-ch"
+              trigger={<><span className="cur">{position + 1}. {shownTitle}</span><Icon name="down" size={14} /></>}
+              variant="ghost"
+              items={switcher}
+            />
+          </div>
         </div>
 
-        <p className="status" role="status" aria-live="polite" data-state={status}>
-          {status === 'saving' && <span className="spin" aria-hidden />}
-          {statusIcon && <Icon name={statusIcon} size={14} />}
-          <span className="st">{statusText}</span>
-          {status === 'error' && <button className="linkish" onClick={() => void save()}>Retry</button>}
-        </p>
+        {!preview && (
+          <div className="tools" role="toolbar" aria-label="Formatting">
+            {tools.map((t, i) => (
+              <span key={t.label} className="tw">
+                {(i === 2 || i === 5) && <span className="sep" aria-hidden />}
+                <button
+                  onMouseDown={e => e.preventDefault()}   // keep the caret in the text
+                  onClick={t.run}
+                  aria-label={t.label}
+                  title={t.key ? `${t.label} (${t.key})` : t.label}
+                  data-text={t.text ? '' : undefined}
+                >
+                  {t.icon ? <Icon name={t.icon} size={18} /> : <span aria-hidden>{t.text}</span>}
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
 
-        <div className="r">
-          <button className="icon-btn hide-sm" disabled={!prevCh} onClick={() => prevCh && void leave(chapterEditHref(novelId, prevCh.slug))}
-                  aria-label="Previous chapter" title={`Previous chapter (${alt} ↑)`}>
-            <Icon name="up" />
+        <div className="acts">
+          <button
+            className="save"
+            data-state={status}
+            onClick={() => void save()}
+            disabled={status === 'saving' || (status !== 'dirty' && status !== 'error')}
+            aria-keyshortcuts={mac ? 'Meta+S' : 'Control+S'}
+            title={`Save (${mod} S) — also saves as you type`}
+          >
+            {status === 'saving' && <span className="spin" aria-hidden />}
+            {saveIcon && <Icon name={saveIcon} size={14} />}
+            <span>{saveLabel}</span>
           </button>
-          <button className="icon-btn hide-sm" onClick={() => void leave(chapterEditHref(novelId, nextCh?.slug ?? NEW_CHAPTER))}
-                  aria-label={nextCh ? 'Next chapter' : 'New chapter'} title={`${nextCh ? 'Next chapter' : 'New chapter'} (${alt} ↓)`}>
-            <Icon name={nextCh ? 'down' : 'plus'} />
+          <span className="sr-only" role="status" aria-live="polite">{status === 'saved' ? 'Saved' : status === 'error' ? 'Not saved' : ''}</span>
+          <button className="icon-btn hide-sm" aria-pressed={preview} onClick={() => setPreview(p => !p)}
+                  aria-label="Preview" title={`Preview (${alt} P)`}>
+            <Icon name="eye" />
           </button>
-          <button className="icon-btn" aria-pressed={preview} onClick={() => setPreview(p => !p)}
-                  aria-label={preview ? 'Back to writing' : 'Preview'} title={`Preview (${alt} P)`}>
-            <Icon name={preview ? 'pen' : 'eye'} />
+          <button className="icon-btn hide-sm" aria-pressed={focus} onClick={() => void toggleFocus()}
+                  aria-label="Focus mode" title={`Focus mode (${alt} F)`}>
+            <Icon name={focus ? 'collapse' : 'expand'} />
           </button>
-          <Menu
-            label="Chapter actions"
-            items={[
-              ...(slug.current ? [{ label: 'Read this chapter', icon: 'book' as const, onSelect: () => void leave(localChapterHref(novelId, slug.current)) }] : []),
-              { label: 'Keyboard shortcuts', icon: 'keyboard', hint: '?', onSelect: () => setKeys(true) },
-              ...(slug.current ? ['sep' as const, { label: 'Delete chapter', icon: 'trash' as const, tone: 'danger' as const, onSelect: () => setAsk({ kind: 'delete' }) }] : [])
-            ]}
-          />
-          <button className="btn done" data-variant="primary" data-size="sm" onClick={() => void leave(back)} title={`${mod} ↵`}>Done</button>
+          <Menu label="Chapter actions" items={more} />
+          <button className="btn done" data-variant="primary" data-size="sm" onClick={() => void leave(back)} title={`Done (${mod} ↵)`}>Done</button>
         </div>
       </header>
 
-      {!preview && (
-        <div className="tools chrome" role="toolbar" aria-label="Formatting">
-          {tools.map((t, i) => (
-            <span key={t.label} className="tw">
-              {(i === 2 || i === 5) && <span className="sep" aria-hidden />}
-              <button onMouseDown={e => e.preventDefault()} onClick={t.run} aria-label={t.label} title={t.key ? `${t.label} — ${t.key}` : t.label}>
-                <Icon name={t.icon} size={18} />
-              </button>
-            </span>
-          ))}
-        </div>
-      )}
-
       <main className="sheet">
-        <p className="eyebrow">{chapterLabel(number)}<span className="of"> · {novel.title}</span></p>
+        <div className="meta">
+          <span className="eyebrow">Chapter {position + 1} <span className="of">of {total}</span></span>
+          <label className="draft">
+            <span>Draft</span>
+            <button
+              className="switch" role="switch" aria-checked={draft}
+              aria-label="Draft — hidden from readers until it’s ready"
+              title={draft ? 'Hidden from readers' : 'Visible to readers'}
+              onClick={() => edit(() => setDraftFlag(d => !d))}
+            ><i /></button>
+          </label>
+        </div>
 
         {preview ? (
           <>
-            <h1 className="ctitle as-text">{title.trim() || 'Untitled chapter'}</h1>
+            <h1 className="ctitle as-text">{shownTitle}</h1>
             {body.trim()
               ? <article className="prose pv" dangerouslySetInnerHTML={{ __html: previewHtml }} />
               : <p className="caption">Nothing written yet.</p>}
@@ -410,6 +523,7 @@ export default function ChapterEditorScreen() {
         ) : (
           <>
             <input
+              ref={titleEl}
               className="ctitle"
               value={title}
               onChange={e => edit(() => setTitle(e.target.value))}
@@ -417,7 +531,6 @@ export default function ChapterEditorScreen() {
               placeholder="Chapter title"
               aria-label="Chapter title"
               spellCheck
-              autoFocus={!slug.current}
             />
             <textarea
               ref={area}
@@ -425,8 +538,8 @@ export default function ChapterEditorScreen() {
               value={body}
               onChange={e => edit(() => setBody(e.target.value))}
               onInput={grow}
-              onKeyDown={() => setTyping(true)}
-              placeholder="Start writing…"
+              onKeyDown={e => { if (e.key.length === 1 || e.key === 'Enter' || e.key === 'Backspace') setTyping(true); }}
+              placeholder="Begin the chapter…"
               aria-label="Chapter text"
               spellCheck
             />
@@ -434,10 +547,20 @@ export default function ChapterEditorScreen() {
         )}
       </main>
 
-      <footer className="counts caption mono" aria-label="Counts">
-        <span>{words.toLocaleString()} {words === 1 ? 'word' : 'words'}</span>
-        <span>{chars.toLocaleString()} characters</span>
-        {words > 0 && <span>{readingMinutes(words)} min read</span>}
+      <footer className="foot">
+        <button className="nav prev" onClick={goPrev} disabled={!prevCh} title={`Previous chapter (${alt} ↑)`}>
+          <Icon name="arrowLeft" size={16} />
+          <span className="nl"><span className="caption">Previous</span><span className="nt">{prevCh?.title ?? '—'}</span></span>
+        </button>
+        <p className="counts mono" aria-label="Length">
+          <span>{words.toLocaleString()} {words === 1 ? 'word' : 'words'}</span>
+          <span>{chars.toLocaleString()} characters</span>
+          {words > 0 && <span>{readingMinutes(words)} min read</span>}
+        </p>
+        <button className="nav next" onClick={goNext} title={`${nextCh ? 'Next chapter' : 'New chapter'} (${alt} ↓)`}>
+          <span className="nl"><span className="caption">{nextCh ? 'Next' : 'After this'}</span><span className="nt">{nextCh?.title ?? 'New chapter'}</span></span>
+          <Icon name={nextCh ? 'arrowRight' : 'plus'} size={16} />
+        </button>
       </footer>
 
       <Shortcuts
@@ -449,8 +572,9 @@ export default function ChapterEditorScreen() {
             { keys: [mod, 'K'], label: 'Link' }, { keys: [mod, 'S'], label: 'Save now' }
           ] },
           { name: 'Moving', items: [
-            { keys: [alt, '↑'], label: 'Previous chapter' }, { keys: [alt, '↓'], label: 'Next / new chapter' },
-            { keys: [alt, 'P'], label: 'Preview' }, { keys: [mod, '↵'], label: 'Done' }, { keys: ['Esc'], label: 'Back to the book' }
+            { keys: [alt, '↑'], label: 'Previous chapter' }, { keys: [alt, '↓'], label: 'Next or new chapter' },
+            { keys: [alt, 'P'], label: 'Preview' }, { keys: [alt, 'F'], label: 'Focus mode' },
+            { keys: [mod, '↵'], label: 'Done' }, { keys: ['Esc'], label: 'Leave preview / focus' }
           ] }
         ]}
       />
@@ -469,8 +593,8 @@ export default function ChapterEditorScreen() {
 
       <ConfirmDialog
         open={ask?.kind === 'delete'}
-        title={`Delete “${title.trim() || 'this chapter'}”?`}
-        body="The text is removed from this device. You’ll have a few seconds to undo."
+        title={`Delete “${shownTitle}”?`}
+        body="The chapter’s text is removed from this device. You’ll have a few seconds to undo."
         onDismiss={() => setAsk(null)}
         choices={[
           { label: 'Keep it', onPick: () => setAsk(null), variant: 'primary' },
@@ -480,13 +604,13 @@ export default function ChapterEditorScreen() {
             onPick: async () => {
               setAsk(null);
               if (timer.current) clearTimeout(timer.current);
-              const before = upsertChapter(novel, { slug: slug.current, title, body });
+              const before = upsertChapter(novel, { slug: slug.current, title, body, draft });
               try {
                 await putNovel(removeChapter(before, slug.current));
                 setStatus('clean');
                 router.push(back);
                 toast({
-                  message: `Deleted “${title.trim() || 'Untitled chapter'}”`,
+                  message: `Deleted “${shownTitle}”`,
                   action: { label: 'Undo', onClick: async () => { await putNovel(before); notifyChanged(); } }
                 });
               } catch { setStatus('error'); }
@@ -498,67 +622,79 @@ export default function ChapterEditorScreen() {
       <style jsx>{`
         .screen { min-height: 100dvh; display: flex; flex-direction: column; }
 
+        /* ---- the bar: where you are · how it's set · what's saved ---- */
         .bar {
           position: sticky; top: 0; z-index: var(--z-crumb);
-          display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: var(--s-4);
-          height: calc(3.5rem + env(safe-area-inset-top, 0px));
-          padding: env(safe-area-inset-top, 0px) max(var(--s-3), env(safe-area-inset-right)) 0 max(var(--s-3), env(safe-area-inset-left));
-          box-shadow: 0 1px 0 var(--rule);
-          transition: opacity var(--dur-4) var(--ease-out);
+          display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: var(--s-4);
+          min-height: calc(3.5rem + env(safe-area-inset-top, 0px));
+          padding: env(safe-area-inset-top, 0px) max(var(--s-3), env(safe-area-inset-right)) 0 max(var(--s-2), env(safe-area-inset-left));
+          background: var(--bg); box-shadow: 0 1px 0 var(--rule);
+          transition: opacity var(--dur-4) var(--ease-out), transform var(--dur-3) var(--ease-spring);
         }
-        .l, .r { display: flex; align-items: center; gap: var(--s-1); min-width: 0; }
-        .r { justify-content: flex-end; }
-        .picker { min-width: 0; max-width: 18rem; flex: 1 1 auto; }
-        .picker :global(.select) { width: 100%; background-color: transparent; font-weight: 500; text-overflow: ellipsis; }
-        .picker :global(.select:hover) { background-color: var(--fill); }
-        .r :global(.done) { margin-left: var(--s-2); }
+        .where { display: flex; align-items: center; gap: var(--s-1); min-width: 0; }
+        .crumb { display: grid; min-width: 0; line-height: 1.1; }
+        .book { font-size: var(--t-micro); color: var(--ink-3); padding-left: var(--s-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .crumb :global(.switch-ch) { min-width: 0; }
+        .crumb :global(.switch-ch > .btn) {
+          min-height: 1.9rem; padding: 0 var(--s-3); gap: var(--s-1); max-width: 100%;
+          font-family: var(--font-serif); font-size: 1rem; font-weight: 500; color: var(--ink);
+        }
+        .cur { overflow: hidden; text-overflow: ellipsis; }
 
-        .status {
-          margin: 0; display: inline-flex; align-items: center; gap: var(--s-2);
-          font-size: var(--t-caption); color: var(--ink-3); white-space: nowrap;
-          padding: 0.25rem 0.7rem; border-radius: var(--r-round); background: var(--fill);
+        .tools { display: flex; align-items: center; gap: 1px; }
+        .tw { display: inline-flex; align-items: center; }
+        .tools button {
+          display: grid; place-items: center; min-width: 2.25rem; height: 2.25rem; padding: 0 var(--s-1);
+          border-radius: var(--r-sm); border: 0; background: none; color: var(--ink-2); cursor: pointer;
+          transition: color var(--dur-2), background-color var(--dur-2), transform var(--dur-1) var(--ease-spring);
         }
-        .status[data-state='saved'], .status[data-state='clean'] { color: var(--ink-3); }
-        .status[data-state='saved'] :global(svg), .status[data-state='clean'] :global(svg) { color: var(--ok); }
-        .status[data-state='dirty'] { color: var(--ink-2); }
-        .status[data-state='error'] { color: var(--err); background: var(--err-bg); }
+        .tools button[data-text] { font-family: var(--font-serif); font-size: 0.8rem; letter-spacing: 0.08em; padding: 0 var(--s-3); }
+        .tools button:hover { color: var(--ink); background: var(--fill); }
+        .tools button:active { background: var(--fill-2); transform: scale(0.92); }
+        .sep { width: 1px; height: 1.1rem; background: var(--rule-strong); margin: 0 var(--s-2); }
+
+        .acts { display: flex; align-items: center; justify-content: flex-end; gap: var(--s-1); }
+        .acts :global(.done) { margin-left: var(--s-2); }
+        .save {
+          display: inline-flex; align-items: center; gap: var(--s-2); white-space: nowrap;
+          min-height: 2rem; padding: 0 var(--s-3); margin-right: var(--s-2);
+          border: 0; border-radius: var(--r-sm); background: transparent;
+          font-size: var(--t-caption); color: var(--ink-3); cursor: default;
+          transition: color var(--dur-3) var(--ease-out), background-color var(--dur-3) var(--ease-out);
+        }
+        .save[data-state='saved'] :global(svg), .save[data-state='clean'] :global(svg) { color: var(--ok); }
+        .save[data-state='dirty'] { color: var(--ink); background: var(--fill); cursor: pointer; font-weight: 500; }
+        .save[data-state='dirty']:hover { background: var(--fill-2); }
+        .save[data-state='error'] { color: var(--err); background: var(--err-bg); cursor: pointer; font-weight: 500; }
         .spin {
           width: 0.75rem; height: 0.75rem; border-radius: var(--r-round);
           border: 1.5px solid var(--ink-3); border-right-color: transparent; animation: spin 700ms linear infinite;
         }
 
-        .tools {
-          position: sticky; top: calc(3.5rem + env(safe-area-inset-top, 0px)); z-index: var(--z-sticky);
-          display: flex; justify-content: center; align-items: center; gap: 2px;
-          padding: var(--s-2) var(--s-4); box-shadow: 0 1px 0 var(--rule);
-          transition: opacity var(--dur-4) var(--ease-out);
-        }
-        .tw { display: inline-flex; align-items: center; }
-        .tools button {
-          display: grid; place-items: center; width: 2.25rem; height: 2.25rem; border-radius: var(--r-sm); border: 0;
-          background: none; color: var(--ink-2); cursor: pointer;
-          transition: color var(--dur-2), background-color var(--dur-2), transform var(--dur-1) var(--ease-spring);
-        }
-        .tools button:hover { color: var(--ink); background: var(--fill); }
-        .tools button:active { background: var(--fill-2); transform: scale(0.92); }
-        .sep { width: 1px; height: 1.1rem; background: var(--rule-strong); margin: 0 var(--s-3); }
-
         /* Writing: the chrome steps back, never away — it's still there to find. */
-        .screen[data-typing] .bar, .screen[data-typing] .tools { opacity: 0.28; }
-        .screen[data-typing] .bar:focus-within, .screen[data-typing] .tools:focus-within { opacity: 1; }
+        .screen[data-typing] .bar, .screen[data-typing] .foot { opacity: 0.25; }
+        .screen[data-typing] .bar:focus-within, .screen[data-typing] .foot:focus-within { opacity: 1; }
+        /* Focus mode: gone until the pointer reaches an edge. */
+        .screen[data-focus] .bar { opacity: 0; transform: translate3d(0, -100%, 0); }
+        .screen[data-focus] .bar:hover, .screen[data-focus] .bar:focus-within { opacity: 1; transform: none; }
+        .screen[data-focus] .foot { opacity: 0; }
+        .screen[data-focus] .foot:hover, .screen[data-focus] .foot:focus-within { opacity: 1; }
 
+        /* ---- the page ---- */
         .sheet {
           flex: 1; width: 100%; max-width: calc(var(--measure) + 2 * var(--gutter));
-          margin-inline: auto; padding: clamp(var(--s-7), 7vw, var(--s-9)) var(--gutter) 12rem;
+          margin-inline: auto; padding: clamp(var(--s-7), 8vh, var(--s-9)) var(--gutter) var(--s-9);
           display: flex; flex-direction: column;
         }
-        .sheet .eyebrow { margin-bottom: var(--s-4); }
-        .of { color: var(--ink-3); font-weight: 500; letter-spacing: 0.08em; }
+        .meta { display: flex; align-items: center; justify-content: space-between; gap: var(--s-4); margin-bottom: var(--s-4); }
+        .of { color: var(--ink-3); }
+        .draft { display: inline-flex; align-items: center; gap: var(--s-3); font-size: var(--t-caption); color: var(--ink-3); cursor: pointer; }
+        .draft :global(.switch) { transform: scale(0.85); transform-origin: right center; }
 
         /* Title and body are the page. No boxes, no rounded inputs — a border here
            would make writing a chapter feel like filling in a form. */
         .ctitle {
-          background: none; border: 0; outline: none; padding: 0; width: 100%; margin: 0 0 var(--s-6);
+          background: none; border: 0; outline: none; padding: 0; width: 100%; margin: 0 0 var(--s-7);
           color: var(--ink); font-family: var(--font-serif); font-weight: 500;
           font-size: clamp(1.9rem, 1.3rem + 2.4vw, 2.75rem);
           line-height: 1.1; letter-spacing: -0.022em; font-optical-sizing: auto;
@@ -570,38 +706,62 @@ export default function ChapterEditorScreen() {
           resize: none; overflow: hidden;   /* it grows instead — the page scrolls */
           color: var(--ink); font-family: var(--prose-font);
           font-size: var(--prose); line-height: var(--prose-leading); letter-spacing: 0.002em;
-          min-height: 50vh;
+          min-height: 55vh; caret-color: var(--accent);
         }
-        .cbody::placeholder { color: var(--ink-4); }
+        .cbody::placeholder { color: var(--ink-4); font-style: italic; }
         .cbody:focus-visible { outline: none; }
         .pv { margin: 0; max-width: none; }
 
-        .counts {
-          position: fixed; left: var(--s-5); bottom: max(var(--s-4), env(safe-area-inset-bottom)); z-index: var(--z-sticky);
-          display: flex; gap: var(--s-4); padding: var(--s-2) var(--s-4);
-          border-radius: var(--r-round); background: var(--chrome); color: var(--ink-3);
-          backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); box-shadow: 0 0 0 1px var(--rule);
-          font-size: var(--t-micro);
+        /* ---- the foot: neighbours and length, in the flow of the page ---- */
+        .foot {
+          position: sticky; bottom: 0; z-index: var(--z-sticky);
+          display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: var(--s-4);
+          padding: var(--s-2) max(var(--s-3), env(safe-area-inset-right)) max(var(--s-2), env(safe-area-inset-bottom)) max(var(--s-3), env(safe-area-inset-left));
+          background: var(--chrome); backdrop-filter: blur(16px) saturate(160%); -webkit-backdrop-filter: blur(16px) saturate(160%);
+          box-shadow: 0 -1px 0 var(--rule);
+          transition: opacity var(--dur-4) var(--ease-out);
         }
+        .nav {
+          display: flex; align-items: center; gap: var(--s-3); min-width: 0; min-height: 2.75rem;
+          padding: 0 var(--s-3); border: 0; border-radius: var(--r-sm); background: transparent;
+          color: var(--ink-2); cursor: pointer; text-align: start;
+          transition: background-color var(--dur-2), color var(--dur-2);
+        }
+        .nav:hover:not(:disabled) { background: var(--fill); color: var(--ink); }
+        .nav:disabled { opacity: 0.4; cursor: default; }
+        .nav.next { justify-self: end; text-align: end; }
+        .nl { display: grid; min-width: 0; line-height: 1.25; }
+        .nt { font-size: var(--t-callout); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 16rem; }
+        .counts { display: flex; gap: var(--s-4); margin: 0; font-size: var(--t-micro); color: var(--ink-3); white-space: nowrap; }
 
-        @media (max-width: 40rem) {
-          .bar { grid-template-columns: auto minmax(0, 1fr) auto; gap: var(--s-2); }
-          .picker { display: none; }
-          .status { justify-self: center; max-width: 100%; overflow: hidden; }
-          .st { overflow: hidden; text-overflow: ellipsis; }
-          .bar :global(.hide-sm) { display: none; }
-          .sheet { padding-bottom: 9rem; }
-          /* Formatting moves to the thumb, and stays out of the prose. */
+        @media (max-width: 64rem) {
+          .bar { grid-template-columns: minmax(0, 1fr) auto; }
           .tools {
-            position: fixed; top: auto; inset: auto 0 0 0; z-index: var(--z-nav);
-            justify-content: space-around; gap: 0;
-            padding: var(--s-1) var(--s-2) max(var(--s-1), env(safe-area-inset-bottom));
-            box-shadow: 0 -1px 0 var(--rule);
+            grid-column: 1 / -1; grid-row: 2; justify-content: center;
+            margin: 0 calc(max(var(--s-3), env(safe-area-inset-right)) * -1) 0 calc(max(var(--s-2), env(safe-area-inset-left)) * -1);
+            padding: var(--s-1) 0; box-shadow: 0 -1px 0 var(--rule);
           }
-          .tools button { width: 2.75rem; height: 2.75rem; }
+        }
+        /* Phones: one bar at the top (back, chapter, save, Done), formatting at the thumb,
+           and everything else behind the ··· — not a strip of eleven buttons. */
+        @media (max-width: 40rem) {
+          .bar { gap: var(--s-2); }
+          .bar :global(.hide-sm) { display: none; }
+          .book { display: none; }
+          .save { margin-right: 0; padding: 0 var(--s-2); }
+          .save span:not(.spin) { max-width: 5.5rem; overflow: hidden; text-overflow: ellipsis; }
+          .tools {
+            position: fixed; inset: auto 0 0 0; z-index: var(--z-nav); margin: 0;
+            justify-content: space-between; padding: var(--s-1) var(--s-2) max(var(--s-1), env(safe-area-inset-bottom));
+            background: var(--chrome); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+          }
+          .tools button { min-width: 2.75rem; height: 2.75rem; }
           .sep { display: none; }
-          .counts { left: 50%; transform: translateX(-50%); bottom: calc(3.6rem + env(safe-area-inset-bottom, 0px)); }
+          .sheet { padding-bottom: var(--s-6); }
+          .foot { position: static; grid-template-columns: 1fr 1fr; padding-bottom: calc(4rem + env(safe-area-inset-bottom, 0px)); box-shadow: none; background: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
+          .counts { grid-column: 1 / -1; grid-row: 1; justify-content: center; }
           .counts span:nth-child(2) { display: none; }
+          .nt { max-width: 9rem; }
         }
       `}</style>
     </div>

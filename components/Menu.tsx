@@ -43,7 +43,12 @@ export default function Menu({
 
   useEffect(() => {
     if (!open) return;
-    requestAnimationFrame(() => itemsEls()[0]?.focus());
+    // Open onto the current choice where there is one (a chapter switcher opens on
+    // the chapter you're in), otherwise onto the first item.
+    requestAnimationFrame(() => {
+      const els = itemsEls();
+      (els.find(e => e.getAttribute('aria-checked') === 'true') ?? els[0])?.focus();
+    });
     const onDown = (e: PointerEvent) => {
       const t = e.target as Node;
       if (!list.current?.contains(t) && !btn.current?.contains(t)) close(false);
@@ -127,6 +132,7 @@ export default function Menu({
         .menu-root { position: relative; display: inline-flex; }
         ul {
           position: absolute; z-index: var(--z-sheet); top: calc(100% + 6px); right: 0;
+          max-height: min(60vh, 28rem); overflow-y: auto; overscroll-behavior: contain;
           transform-origin: top right;
           animation: menu-in var(--dur-2) var(--ease-spring) both;
         }

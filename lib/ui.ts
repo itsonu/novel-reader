@@ -13,21 +13,18 @@ const reduced = () =>
  * `closing` is true for the exit window; style the exit off `[data-closing]`.
  */
 export function usePresence(open: boolean, exitMs = 180) {
-  // Mounted is derived, not stored: on the render where `open` flips true the overlay
-  // must already be in the tree, or anything keyed on `open` (focus, scroll lock) runs
-  // against a panel that doesn't exist yet.
-  const [lingering, setLingering] = useState(false);
-  const was = useRef(open);
+  // Derived during render, not in an effect: on the render where `open` flips true the
+  // overlay must already be in the tree (or focus and scroll lock run against nothing),
+  // and on the render where it flips false it must *stay* in the tree — an effect would
+  // unmount it for a frame and then mount it again to play the exit.
+  const [s, set] = useState({ open, lingering: false });
+  if (s.open !== open) set({ open, lingering: !open && s.open && !reduced() });
+  const lingering = s.open === open ? s.lingering : !open && s.open && !reduced();
   useEffect(() => {
-    const before = was.current;
-    was.current = open;
-    if (open) { setLingering(false); return; }
-    if (!before) return;
-    if (reduced()) return;
-    setLingering(true);
-    const t = window.setTimeout(() => setLingering(false), exitMs);
+    if (!lingering) return;
+    const t = window.setTimeout(() => set(x => (x.open ? x : { ...x, lingering: false })), exitMs);
     return () => window.clearTimeout(t);
-  }, [open, exitMs]);
+  }, [lingering, exitMs]);
   return { mounted: open || lingering, closing: !open && lingering };
 }
 
@@ -83,6 +80,10 @@ export function useModal(
       window.removeEventListener('keydown', onKey, true);
       if (lock) document.body.style.overflow = prev;
       if (restore && document.contains(restore)) restore.focus({ preventScroll: true });
+      // Nothing focusable to go back to (it was the page body, or it left with a route
+      // change): let go anyway, or focus stays in a panel that's fading out and every
+      // page shortcut reads it as "typing in a field".
+      if (root?.contains(document.activeElement)) (document.activeElement as HTMLElement).blur();
     };
   }, [open, ref, lock]);
 }

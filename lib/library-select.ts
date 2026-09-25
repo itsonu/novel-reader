@@ -7,6 +7,7 @@
 // Type-only imports so `node` can strip types and run it directly.
 import type { Bookmark, Progress, SavedNovel, StoredNovel } from './library';
 import { localChapterHref, localNovelHref, publishedNovelHref } from './routes.ts';
+import { readableChapters } from './chapters.ts';
 
 export type Status = 'new' | 'reading' | 'finished';
 
@@ -56,14 +57,16 @@ export function buildCards(
 
   const local: Card[] = novels.map(n => {
     const p = byId.get(n.id);
-    const words = n.chapters.reduce((s, c) => s + c.words, 0);
-    const first = [...n.chapters].sort((a, b) => a.ordinal - b.ordinal)[0];
+    // What a reader can open: drafts don't count toward chapters, words or "start here".
+    const readable = readableChapters(n);
+    const words = readable.reduce((s, c) => s + c.words, 0);
+    const first = readable[0];
     const percent = p?.percent ?? 0;
     return {
       id: n.id,
       title: n.title,
       author: n.author,
-      chapters: n.chapters.length,
+      chapters: readable.length,
       words,
       addedAt: n.addedAt,
       favorite: Boolean(n.favorite),
@@ -74,7 +77,7 @@ export function buildCards(
       percent,
       status: statusOf(percent),
       lastReadAt: p?.at,
-      chapterLabel: p && `Chapter ${p.chapterIndex + 1} of ${n.chapters.length} · ${p.chapterTitle}`
+      chapterLabel: p && `Chapter ${p.chapterIndex + 1} of ${readable.length} · ${p.chapterTitle}`
     };
   });
 

@@ -21,7 +21,7 @@
 }
 /* ambient depth behind the hero — two soft accent pools, drifting slowly.
    Composited (transform only), behind everything, gone under reduced motion. */
-.hero-wrap::before {
+.hero-wrap::before { display: none;
   content: ''; position: absolute; inset: -20% -10%; z-index: -1;
   pointer-events: none;
   background:
@@ -150,7 +150,7 @@
   padding: clamp(4rem, 12vw, 8rem) 1.5rem clamp(5rem, 14vw, 9rem);
   position: relative; isolation: isolate;
 }
-.closer::before {
+.closer::before { display: none;
   content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none;
   background: radial-gradient(34rem 18rem at 50% 62%, color-mix(in oklab, var(--accent) 6%, transparent), transparent 70%);
 }
@@ -175,7 +175,7 @@
    Breaks the banding in the hero's radial pools and gives the flat dark field
    the tooth of printed stock. Landing-scoped on purpose: over live prose it
    would fight the spoken-word highlight. */
-.landing::after {
+.landing::after { display: none;
   content: ''; position: fixed; inset: 0; pointer-events: none;
   z-index: 1; opacity: 0.035; mix-blend-mode: overlay;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");

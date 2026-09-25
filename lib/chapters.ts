@@ -20,6 +20,10 @@ export const readingMinutes = (words: number): number => (words ? Math.max(1, Ma
 export const orderedChapters = (novel: StoredNovel): StoredChapter[] =>
   [...novel.chapters].sort((a, b) => a.ordinal - b.ordinal);
 
+/** What a reader sees: reading order, drafts left out. */
+export const readableChapters = (novel: StoredNovel): StoredChapter[] =>
+  orderedChapters(novel).filter(c => !c.draft);
+
 export const chapterIndex = (novel: StoredNovel, slug: string): number =>
   orderedChapters(novel).findIndex(c => c.slug === slug);
 
@@ -40,7 +44,7 @@ export function draftSlug(title: string, taken: string[], now: number): string {
   }
 }
 
-export type Draft = { slug: string; title: string; body: string };
+export type Draft = { slug: string; title: string; body: string; draft?: boolean };
 
 /**
  * Every mutator ends here: chapters come back in reading order with contiguous
@@ -62,8 +66,10 @@ export function upsertChapter(novel: StoredNovel, draft: Draft): StoredNovel {
   return normalize(
     novel,
     exists
-      ? list.map(c => (c.slug === draft.slug ? { ...c, title, body: draft.body, words } : c))
-      : [...list, { slug: draft.slug, title, body: draft.body, words, ordinal: list.length + 1 }]
+      ? list.map(c => (c.slug === draft.slug
+          ? { ...c, title, body: draft.body, words, ...(draft.draft !== undefined ? { draft: draft.draft } : {}) }
+          : c))
+      : [...list, { slug: draft.slug, title, body: draft.body, words, ordinal: list.length + 1, ...(draft.draft ? { draft: true } : {}) }]
   );
 }
 
@@ -85,3 +91,28 @@ export function moveChapter(novel: StoredNovel, from: number, to: number): Store
 
 /** Two-digit chapter label. Derived from position, never typed by the writer. */
 export const chapterLabel = (index: number): string => `Chapter ${String(index + 1).padStart(2, '0')}`;
+
+/** Mark a chapter as a draft (hidden from readers) or ready. Position and text untouched. */
+export function setDraft(novel: StoredNovel, slug: string, draft: boolean): StoredNovel {
+  return normalize(novel, orderedChapters(novel).map(c => {
+    if (c.slug !== slug) return c;
+    const { draft: _was, ...rest } = c;
+    return draft ? { ...rest, draft: true } : rest;
+  }));
+}
+
+/**
+ * Copy a chapter to sit directly after the original. The copy starts as a draft — a
+ * duplicate is nearly always the start of a rewrite, and two identical chapters in a
+ * reader's contents would read as a bug.
+ */
+export function duplicateChapter(novel: StoredNovel, slug: string, now: number): { novel: StoredNovel; slug: string } {
+  const list = orderedChapters(novel);
+  const at = list.findIndex(c => c.slug === slug);
+  if (at < 0) return { novel: normalize(novel, list), slug: '' };
+  const src = list[at];
+  const title = `${src.title} (copy)`;
+  const copy: StoredChapter = { ...src, slug: draftSlug(title, list.map(c => c.slug), now), title, draft: true };
+  list.splice(at + 1, 0, copy);
+  return { novel: normalize(novel, list), slug: copy.slug };
+}

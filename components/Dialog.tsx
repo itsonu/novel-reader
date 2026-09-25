@@ -36,7 +36,7 @@ export default function Dialog({
         className="panel"
         data-size={size}
         role="dialog"
-        aria-modal="true"
+        aria-modal={closing ? undefined : true}
         aria-labelledby={`${id}-t`}
         aria-describedby={description ? `${id}-d` : undefined}
         tabIndex={-1}

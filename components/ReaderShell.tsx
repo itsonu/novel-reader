@@ -385,7 +385,7 @@ function Drawer({
   return (
     <div className="droot" data-closing={closing || undefined}>
       <div className="scrim" aria-hidden onClick={onClose} />
-      <div ref={panel} className="drawer" role="dialog" aria-modal="true" aria-label="Contents" tabIndex={-1}>
+      <div ref={panel} className="drawer" role="dialog" aria-modal={closing ? undefined : true} aria-label="Contents" tabIndex={-1}>
         <header className="dh">
           <Link href={novel.href} className="book" onClick={onClose}>
             <Cover title={novel.title} author={novel.author} src={novel.cover} size="sm" />

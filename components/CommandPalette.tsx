@@ -66,7 +66,7 @@ export default function CommandPalette({ open, onClose }: { open: boolean; onClo
       card: c, run: () => go(c.detailsHref), keywords: c.author
     });
     for (const n of novels) {
-      const list = [...n.chapters].sort((a, b) => a.ordinal - b.ordinal);
+      const list = [...n.chapters].filter(c => !c.draft).sort((a, b) => a.ordinal - b.ordinal);
       list.forEach((ch, i) => out.push({
         id: `c:${n.id}:${ch.slug}`, group: 'Chapters', label: ch.title, sub: `${n.title} · Chapter ${i + 1}`,
         icon: 'file', run: () => go(localChapterHref(n.id, ch.slug)), keywords: `${n.title} ${i + 1}`
@@ -126,7 +126,7 @@ export default function CommandPalette({ open, onClose }: { open: boolean; onClo
   return (
     <div className="root" data-closing={closing || undefined}>
       <div className="scrim" aria-hidden onClick={onClose} />
-      <div ref={panel} className="panel" role="dialog" aria-modal="true" aria-label="Search and commands">
+      <div ref={panel} className="panel" role="dialog" aria-modal={closing ? undefined : true} aria-label="Search and commands">
         <label className="field">
           <Icon name="search" size={18} />
           <input

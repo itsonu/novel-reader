@@ -69,11 +69,13 @@ kbd, .kbd {
 .btn[data-size='lg'] { --h: 3rem; padding: 0 var(--s-6); font-size: var(--t-body); border-radius: var(--r-md); }
 
 .btn[data-variant='primary'] {
-  background: var(--accent); border-color: transparent; color: var(--accent-ink); font-weight: 600;
-  box-shadow: 0 1px 0 color-mix(in oklab, #fff 22%, transparent) inset, var(--shadow-1);
+  /* Ink on paper. The accent is kept for marks and progress, so the one filled
+     button on a screen reads as "the next thing", not as a banner. */
+  background: var(--ink); border-color: transparent; color: var(--bg); font-weight: 600;
+  box-shadow: var(--shadow-1);
 }
-.btn[data-variant='primary']:hover { background: color-mix(in oklab, var(--accent) 88%, var(--ink)); }
-.btn[data-variant='primary']:active { background: color-mix(in oklab, var(--accent) 80%, var(--ink)); }
+.btn[data-variant='primary']:hover { background: color-mix(in oklab, var(--ink) 86%, var(--bg)); border-color: transparent; }
+.btn[data-variant='primary']:active { background: color-mix(in oklab, var(--ink) 76%, var(--bg)); }
 .btn[data-variant='tinted'] { background: var(--accent-soft); border-color: transparent; color: var(--accent); font-weight: 600; }
 .btn[data-variant='tinted']:hover { background: color-mix(in oklab, var(--accent) 20%, transparent); }
 .btn[data-variant='ghost'] { border-color: transparent; color: var(--ink-2); }
@@ -91,13 +93,13 @@ kbd, .kbd {
   border-color: var(--ink-3) var(--ink-3) var(--ink-3) transparent;
   animation: spin 700ms linear infinite;
 }
-.btn[data-variant='primary'][data-loading='true']::after { border-color: var(--accent-ink) var(--accent-ink) var(--accent-ink) transparent; }
+.btn[data-variant='primary'][data-loading='true']::after { border-color: var(--bg) var(--bg) var(--bg) transparent; }
 
 .icon-btn {
   --size: 2.5rem;
   appearance: none; position: relative; flex: none;
   display: inline-grid; place-items: center; width: var(--size); height: var(--size);
-  border-radius: var(--r-round); border: 0; background: transparent; color: var(--ink-2);
+  border-radius: var(--r-md); border: 0; background: transparent; color: var(--ink-2);
   cursor: pointer; touch-action: manipulation; text-decoration: none;
   transition: transform var(--dur-1) var(--ease-spring), background-color var(--dur-2) var(--ease-out), color var(--dur-2) var(--ease-out);
 }
@@ -205,14 +207,14 @@ textarea.input { padding: var(--s-3) var(--s-4); min-height: 6rem; resize: verti
 .chip {
   display: inline-flex; align-items: center; gap: var(--s-2);
   min-height: 2rem; padding: 0 var(--s-4);
-  border: 1px solid var(--rule); border-radius: var(--r-round); background: transparent;
+  border: 1px solid var(--rule); border-radius: var(--r-sm); background: transparent;
   color: var(--ink-2); font-size: var(--t-caption); font-weight: 500; cursor: pointer; white-space: nowrap;
   transition: color var(--dur-2), border-color var(--dur-2), background-color var(--dur-2), transform var(--dur-1);
 }
 .chip:hover { color: var(--ink); border-color: var(--rule-strong); }
 .chip:active { transform: scale(0.96); }
 .chip[aria-pressed='true'], .chip[data-on] {
-  color: var(--accent); background: var(--accent-soft); border-color: color-mix(in oklab, var(--accent) 40%, transparent);
+  color: var(--ink); background: var(--fill-2); border-color: var(--rule-strong);
 }
 @media (pointer: coarse) { .chip { min-height: 2.5rem; } }
 
@@ -282,7 +284,8 @@ textarea.input { padding: var(--s-3) var(--s-4); min-height: 6rem; resize: verti
   background: var(--surface-2); border-radius: var(--r-lg);
   box-shadow: var(--shadow-3); color: var(--ink);
 }
-.menu { list-style: none; margin: 0; padding: var(--s-2); min-width: 13rem; }
+.menu { list-style: none; margin: 0; padding: var(--s-2); min-width: 14rem; }
+.menu-item > .grow { white-space: nowrap; }
 .menu-item {
   width: 100%; display: flex; align-items: center; gap: var(--s-4);
   min-height: 2.5rem; padding: 0 var(--s-4); border: 0; border-radius: var(--r-sm);

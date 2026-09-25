@@ -22,11 +22,12 @@
 [data-justify='true'] .prose { text-align: justify; hyphens: auto; -webkit-hyphens: auto; }
 
 /* Paragraph rhythm: a space between paragraphs, like the web; no indent. The
-   gap is a fraction of the leading, so it scales with the reader's choices. */
-.prose p { margin: 0 0 calc(var(--prose-leading) * 0.62em); }
-.prose > p:first-child::first-letter {
-  float: inline-start; font-size: 3.35em; line-height: 0.82; font-weight: 500;
-  padding-inline-end: 0.08em; margin-block-start: 0.06em; color: var(--accent);
+   gap follows the leading, so it scales with the reader's choices. */
+.prose p { margin: 0 0 calc(var(--prose-leading) * 0.56em); }
+/* The opening line is set in small caps, the way a printed chapter begins — quieter
+   than a drop cap, and it can't collide with the word highlight or a leading quote. */
+.prose > p:first-child::first-line {
+  font-variant-caps: small-caps; letter-spacing: 0.045em;
 }
 .prose h1 { font-size: 1.55em; line-height: 1.15; letter-spacing: -0.02em; margin: 0 0 1em; font-weight: 600; }
 .prose h2 { font-size: 1.22em; line-height: 1.25; letter-spacing: -0.012em; margin: 2.2em 0 0.7em; font-weight: 600; }
@@ -38,12 +39,12 @@
 }
 .prose ul, .prose ol { padding-inline-start: 1.3em; margin: 0 0 1.1em; }
 .prose li { margin: 0.3em 0; }
-/* Scene break: three quiet points instead of a rule across the column. */
+/* Scene break: an asterism set in the text face, the mark the writer typed. */
 .prose hr {
-  border: 0; height: auto; margin: 2.2em auto; text-align: center; overflow: visible;
+  border: 0; height: auto; margin: 2em auto; text-align: center; overflow: visible;
   color: var(--ink-3);
 }
-.prose hr::before { content: '·  ·  ·'; letter-spacing: 0.4em; font-size: 1.1em; }
+.prose hr::before { content: '*\2003*\2003*'; font-size: 0.95em; letter-spacing: 0; }
 .prose em { font-style: italic; }
 .prose strong { font-weight: 650; }
 .prose a { color: inherit; text-decoration-color: color-mix(in oklab, var(--accent) 60%, transparent); text-underline-offset: 0.16em; }

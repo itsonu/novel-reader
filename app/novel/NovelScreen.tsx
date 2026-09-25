@@ -3,7 +3,7 @@
 // The published equivalent is /n/[slug]; this is the same room for a book that only
 // exists on this device, so the reading flow is identical either way.
 
-import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import ConfirmDialog from '@/components/ConfirmDialog';
@@ -14,10 +14,12 @@ import Menu from '@/components/Menu';
 import ChapterList from '@/components/ChapterList';
 import { toast } from '@/components/Toaster';
 import {
-  deleteBookmark, deleteNovel, getNovel, onLibraryChanged, getProgress, listBookmarks, putBookmark, putNovel,
-  restore, setFavorite, snapshot, type Bookmark, type Progress, type StoredNovel
+  deleteBookmark, deleteNovel, putBookmark, putNovel,
+  restore, setFavorite, snapshot, type Bookmark, type StoredNovel
 } from '@/lib/library';
-import { chapterEditHref, chapterNewHref, localChapterHref } from '@/lib/routes';
+import { chapterEditHref, chapterNewHref, chaptersHref, localChapterHref } from '@/lib/routes';
+import { orderedChapters, readableChapters } from '@/lib/chapters';
+import { useLocalNovel } from '@/lib/useNovel';
 import { linkState, refreshFromFolder, type LinkState } from '@/lib/import';
 import { ago, isTyping, readTime } from '@/lib/ui';
 
@@ -44,30 +46,11 @@ function BookSkeleton() {
 function NovelBody() {
   const router = useRouter();
   const id = useSearchParams().get('id') ?? '';
-  const [phase, setPhase] = useState<'loading' | 'ready' | 'missing'>('loading');
-  const [novel, setNovel] = useState<StoredNovel | null>(null);
-  const [progress, setProgress] = useState<Progress | null>(null);
-  const [marks, setMarks] = useState<Bookmark[]>([]);
+  const { phase, novel, progress, marks, setMarks, setNovel, load } = useLocalNovel(id);
   const [confirming, setConfirming] = useState(false);
   const [editing, setEditing] = useState(false);
   const [link, setLink] = useState<LinkState>('none');
   const [syncing, setSyncing] = useState(false);
-
-  const load = useCallback(async () => {
-    if (!id) { setPhase('missing'); return; }
-    try {
-      const n = await getNovel(id);
-      if (!n) { setPhase('missing'); return; }
-      setNovel(n);
-      setProgress((await getProgress(id)) ?? null);
-      setMarks((await listBookmarks()).filter(b => b.novelId === id).sort((a, b) => b.at - a.at));
-      setPhase('ready');
-    } catch {
-      setPhase('missing');
-    }
-  }, [id]);
-
-  useEffect(() => { void load(); return onLibraryChanged(() => void load()); }, [load]);
 
   /* Is this book still wired to a folder on disk, and may we read it without asking? */
   useEffect(() => { if (id) linkState(id).then(setLink).catch(() => setLink('none')); }, [id]);
@@ -98,7 +81,9 @@ function NovelBody() {
     return () => window.removeEventListener('keydown', onKey);
   }, [router, id]);
 
-  const chapters = useMemo(() => (novel ? [...novel.chapters].sort((a, b) => a.ordinal - b.ordinal) : []), [novel]);
+  // The reading side shows what a reader gets: drafts stay on the Chapters page.
+  const chapters = useMemo(() => (novel ? readableChapters(novel) : []), [novel]);
+  const drafts = novel ? orderedChapters(novel).length - chapters.length : 0;
   const rows = useMemo(() => chapters.map(c => ({
     slug: c.slug, title: c.title, words: c.words,
     href: localChapterHref(id, c.slug), editHref: chapterEditHref(id, c.slug)
@@ -222,6 +207,7 @@ function NovelBody() {
                 label="More actions"
                 items={[
                   { label: 'New chapter', icon: 'plus', href: chapterNewHref(novel.id), hint: 'N' },
+                  { label: 'Manage chapters', icon: 'list', href: chaptersHref(novel.id) },
                   { label: 'Edit details', icon: 'edit', onSelect: () => setEditing(true) },
                   'sep',
                   { label: 'Remove from device', icon: 'trash', tone: 'danger', onSelect: () => setConfirming(true) }
@@ -241,18 +227,27 @@ function NovelBody() {
 
         <section className="booksec" aria-labelledby="ch-h">
           <div className="sechead">
-            <h2 id="ch-h" className="title">Chapters</h2>
-            {chapters.length > 0 && (
+            <h2 id="ch-h" className="title">Contents</h2>
+            <span className="secacts">
+              <Link href={chaptersHref(novel.id)} className="btn" data-variant="ghost" data-size="sm">
+                <Icon name="list" size={15} /> Manage chapters
+              </Link>
               <Link href={chapterNewHref(novel.id)} className="btn" data-size="sm"><Icon name="plus" size={15} /> New chapter</Link>
-            )}
+            </span>
           </div>
+          {drafts > 0 && (
+            <p className="caption draftnote">
+              {drafts} {drafts === 1 ? 'draft isn’t' : 'drafts aren’t'} shown to readers yet — find {drafts === 1 ? 'it' : 'them'} in{' '}
+              <Link href={chaptersHref(novel.id)}>Chapters</Link>.
+            </p>
+          )}
           {chapters.length ? (
             <ChapterList chapters={rows} current={at} marked={markedSlugs} />
           ) : (
             <div className="empty" style={{ marginTop: 0 }}>
               <span className="glyph"><Icon name="pen" size={24} /></span>
-              <h3 className="title-3">No chapters yet</h3>
-              <p>Start with the first one and build the book a page at a time.</p>
+              <h3 className="title-3">{drafts ? 'Nothing ready to read yet' : 'No chapters yet'}</h3>
+              <p>{drafts ? 'Every chapter is still a draft. Mark one as ready on the Chapters page.' : 'Start with the first one and build the book a page at a time.'}</p>
               <div className="actions">
                 <Link href={chapterNewHref(novel.id)} className="btn" data-variant="primary">Write the first chapter</Link>
               </div>
@@ -325,6 +320,9 @@ function NovelBody() {
           display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
         }
         :global(.inl) { display: inline; vertical-align: -2px; }
+        .secacts { display: flex; gap: var(--s-2); flex-wrap: wrap; justify-content: flex-end; }
+        .draftnote { margin: 0 0 var(--s-4); }
+        .draftnote :global(a) { color: var(--accent); }
       `}</style>
     </>
   );

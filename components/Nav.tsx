@@ -33,7 +33,7 @@ const ITEMS: Item[] = [
   {
     href: '/library', label: 'Library', icon: 'library',
     // The local novel page is a room inside the library.
-    owns: p => p === '/library' || p === '/novel'
+    owns: p => p === '/library' || p === '/novel' || p.startsWith('/novel/')
   },
   {
     href: '/publish', label: can.cloudPublishing ? 'Publish' : 'Add', icon: 'plus',

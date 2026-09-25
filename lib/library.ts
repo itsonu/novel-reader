@@ -18,7 +18,12 @@ import { SAMPLE_ID, SAMPLE_NOVEL } from './sample-novel';
 // 'use client' module's exports can only be rendered on the server, never called.
 import { isRemoteId } from './routes';
 
-export type StoredChapter = { slug: string; title: string; ordinal: number; body: string; words: number };
+export type StoredChapter = {
+  slug: string; title: string; ordinal: number; body: string; words: number;
+  /** Still being written: hidden from the reader and its contents, shown in the editor.
+   *  Absent means ready — every chapter that existed before drafts did stays readable. */
+  draft?: boolean;
+};
 export type StoredNovel = {
   id: string;              // slug
   title: string;

@@ -14,6 +14,7 @@ import Icon from '@/components/Icon';
 import { bodyWithoutTitle, md } from '@/lib/reader/markdown';
 import { ensureSeeded, getNovel, getProgress, lastRead, listNovels, type StoredNovel } from '@/lib/library';
 import { chapterEditHref, localChapterHref, localNovelHref } from '@/lib/routes';
+import { readableChapters } from '@/lib/chapters';
 
 export function ReaderSkeleton() {
   return (
@@ -71,7 +72,8 @@ export default function LocalReader() {
   }, [novelId]);
 
   const chapters = useMemo(
-    () => (novel ? [...novel.chapters].sort((a, b) => a.ordinal - b.ordinal) : []),
+    // Drafts aren't part of the book yet; the reader never shows them.
+    () => (novel ? readableChapters(novel) : []),
     [novel]
   );
   const index = chapters.findIndex(c => c.slug === chapterSlug);

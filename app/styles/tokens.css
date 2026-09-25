@@ -54,11 +54,11 @@
   --page-max: 72rem;
 
   /* ---- radii: each has a job, and nothing is round just because ---- */
-  --r-xs: 0.375rem;    /* chips inside controls, keys */
-  --r-sm: 0.5rem;      /* small controls, list rows */
-  --r-md: 0.75rem;     /* buttons, inputs */
-  --r-lg: 1rem;        /* cards, popovers */
-  --r-xl: 1.375rem;    /* sheets, dialogs, hero surfaces */
+  --r-xs: 0.25rem;    /* chips inside controls, keys */
+  --r-sm: 0.375rem;     /* small controls, list rows */
+  --r-md: 0.5rem;      /* buttons, inputs */
+  --r-lg: 0.75rem;     /* cards, popovers */
+  --r-xl: 1rem;       /* sheets, dialogs, hero surfaces */
   --r-cover: 0.3rem 0.55rem 0.55rem 0.3rem;   /* a book: spine side is tighter */
   --r-round: 999px;
   /* legacy aliases */
@@ -106,42 +106,42 @@
 :root,
 [data-theme='dark'] {
   color-scheme: dark;
-  --bg: #121110;
-  --bg-sunken: #0d0c0b;
-  --surface: #1a1917;          /* cards, rows on hover */
-  --surface-2: #211f1c;        /* popovers, dialogs, menus */
-  --surface-3: #2a2824;        /* pressed, selected */
-  --ink: #e6dfd3;
-  --ink-2: #b1a99c;            /* secondary text — 8:1 */
-  --ink-3: #8f877b;            /* tertiary text — 5.3:1, still body-legal */
-  --ink-4: #5f5950;            /* decorative only: rules, placeholders, numerals */
+  --bg: #1c1a17;               /* soft charcoal — ink, not void */
+  --bg-sunken: #171512;
+  --surface: #23201c;          /* cards, rows on hover */
+  --surface-2: #2b2723;        /* popovers, dialogs, menus */
+  --surface-3: #35302b;        /* pressed, selected */
+  --ink: #e2dacb;              /* 12.5:1 — bright enough to read, never glaring */
+  --ink-2: #b2a898;            /* secondary text — 7.4:1 */
+  --ink-3: #9a907f;            /* tertiary text — ≥4.5:1 on every surface */
+  --ink-4: #625a4f;            /* decorative only: rules, placeholders, numerals */
   --rule: color-mix(in oklab, var(--ink) 10%, transparent);
-  --rule-strong: color-mix(in oklab, var(--ink) 18%, transparent);
+  --rule-strong: color-mix(in oklab, var(--ink) 17%, transparent);
   --fill: color-mix(in oklab, var(--ink) 6%, transparent);
   --fill-2: color-mix(in oklab, var(--ink) 10%, transparent);
-  --accent: #e2b05a;
-  --accent-ink: #1c1406;       /* text on an accent fill */
-  --accent-soft: color-mix(in oklab, var(--accent) 14%, transparent);
-  --mark: color-mix(in oklab, var(--accent) 26%, transparent);
-  --focus-ring: color-mix(in oklab, var(--accent) 85%, var(--ink));
-  --chrome: color-mix(in oklab, var(--bg) 78%, transparent);
-  --scrim: color-mix(in oklab, #000 58%, transparent);
+  --accent: #c9a57e;           /* muted sepia — a pencil mark, not a highlighter */
+  --accent-ink: #1c1a17;
+  --accent-soft: color-mix(in oklab, var(--accent) 13%, transparent);
+  --mark: color-mix(in oklab, var(--accent) 24%, transparent);
+  --focus-ring: color-mix(in oklab, var(--accent) 80%, var(--ink));
+  --chrome: color-mix(in oklab, var(--bg) 84%, transparent);
+  --scrim: color-mix(in oklab, #0b0a09 58%, transparent);
 
-  --ok: #86c08f;
-  --warn: #e2b05a;
-  --err: #ec8a74;
-  --info: #8fb5d6;
+  --ok: #93b58e;
+  --warn: #d2ad72;
+  --err: #e0917b;
+  --info: #97b3c9;
   --ok-bg: color-mix(in oklab, var(--ok) 13%, transparent);
   --err-bg: color-mix(in oklab, var(--err) 13%, transparent);
 
-  --shadow-1: 0 1px 2px #0006;
-  --shadow-2: 0 8px 24px -10px #000a, 0 0 0 1px var(--rule);
-  --shadow-3: 0 24px 56px -18px #000c, 0 0 0 1px var(--rule);
-  --shadow-cover: 0 1px 1px #0008, 0 10px 24px -8px #000c;
+  --shadow-1: 0 1px 2px #0005;
+  --shadow-2: 0 6px 18px -10px #0009, 0 0 0 1px var(--rule);
+  --shadow-3: 0 18px 44px -18px #000b, 0 0 0 1px var(--rule);
+  --shadow-cover: 0 1px 1px #0007, 0 8px 20px -8px #000b;
   --e-1: 0 1px 0 var(--rule);
   --e-2: var(--shadow-2);
   --e-3: var(--shadow-3);
-  --e-4: 0 -24px 56px -18px #000c;
+  --e-4: 0 -18px 44px -18px #000b;
 
   /* legacy aliases */
   --paper: var(--bg);
@@ -155,36 +155,36 @@
    ========================================================================== */
 [data-theme='light'] {
   color-scheme: light;
-  --bg: #f8f4ed;
-  --bg-sunken: #f1ebe1;
-  --surface: #fffdfa;
-  --surface-2: #ffffff;
-  --surface-3: #ece5d9;
-  --ink: #1e1b17;
-  --ink-2: #554f47;
-  --ink-3: #6e675d;
-  --ink-4: #a0978a;
+  --bg: #f5f0e6;               /* warm paper */
+  --bg-sunken: #efe8db;
+  --surface: #faf6ee;
+  --surface-2: #fffcf6;
+  --surface-3: #e9e1d2;
+  --ink: #29231c;              /* iron-gall ink, not black */
+  --ink-2: #594f43;
+  --ink-3: #716656;
+  --ink-4: #a3978a;
   --rule: color-mix(in oklab, var(--ink) 11%, transparent);
-  --rule-strong: color-mix(in oklab, var(--ink) 20%, transparent);
+  --rule-strong: color-mix(in oklab, var(--ink) 19%, transparent);
   --fill: color-mix(in oklab, var(--ink) 5%, transparent);
-  --fill-2: color-mix(in oklab, var(--ink) 9%, transparent);
-  --accent: #925f0c;
-  --accent-ink: #ffffff;
-  --accent-soft: color-mix(in oklab, var(--accent) 11%, transparent);
-  --mark: color-mix(in oklab, #e2b05a 42%, transparent);
+  --fill-2: color-mix(in oklab, var(--ink) 8.5%, transparent);
+  --accent: #86603a;           /* sepia */
+  --accent-ink: #fffcf6;
+  --accent-soft: color-mix(in oklab, var(--accent) 10%, transparent);
+  --mark: color-mix(in oklab, #c9a57e 40%, transparent);
   --focus-ring: var(--accent);
-  --chrome: color-mix(in oklab, var(--bg) 76%, transparent);
-  --scrim: color-mix(in oklab, #1e1b17 36%, transparent);
+  --chrome: color-mix(in oklab, var(--bg) 82%, transparent);
+  --scrim: color-mix(in oklab, #29231c 32%, transparent);
 
-  --ok: #2f7a44;
+  --ok: #3d6e44;
   --warn: #8a6410;
-  --err: #b23a24;
+  --err: #a53a26;
   --info: #2f5f86;
 
-  --shadow-1: 0 1px 2px #3a2a1022;
-  --shadow-2: 0 8px 22px -12px #3a2a1040, 0 0 0 1px var(--rule);
-  --shadow-3: 0 22px 48px -20px #3a2a1052, 0 0 0 1px var(--rule);
-  --shadow-cover: 0 1px 1px #3a2a1030, 0 10px 22px -10px #3a2a1066;
+  --shadow-1: 0 1px 2px #3a2a1020;
+  --shadow-2: 0 6px 18px -12px #3a2a1038, 0 0 0 1px var(--rule);
+  --shadow-3: 0 18px 40px -20px #3a2a104a, 0 0 0 1px var(--rule);
+  --shadow-cover: 0 1px 1px #3a2a1026, 0 8px 18px -10px #3a2a1058;
   --e-4: 0 -20px 44px -20px #3a2a1040;
 }
 

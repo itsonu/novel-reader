@@ -12,6 +12,7 @@ import './styles/components.css';
 import './styles/prose.css';
 import './styles/app.css';
 import './styles/landing.css';
+import './styles/how.css';
 import './styles/fx.css';
 
 // Fonts are self-hosted by next/font at build time: no third-party request at runtime,

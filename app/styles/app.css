@@ -1,0 +1,202 @@
+/* ==========================================================================
+   App furniture shared by server and client pages: covers, the chapter
+   heading and ending, book pages, shelves. Global because server components
+   can't use styled-jsx, and because a cover must look the same on every page.
+   ========================================================================== */
+
+/* ---- cover ---- */
+.cover {
+  position: relative; display: block; flex: none; width: 100%;
+  aspect-ratio: 2 / 3; border-radius: var(--r-cover); overflow: hidden;
+  background: var(--surface-3); box-shadow: var(--shadow-cover);
+  container-type: inline-size;
+}
+.cover img { width: 100%; height: 100%; object-fit: cover; }
+.cover .cloth {
+  position: absolute; inset: 0; display: flex; flex-direction: column;
+  padding: 16cqi 11cqi 11cqi 15cqi;
+  color: var(--c-fg);
+  /* spine shadow, a catch of light on the board, then the cloth */
+  background:
+    linear-gradient(90deg, rgb(0 0 0 / 0.32) 0, rgb(0 0 0 / 0.1) 3.5%, rgb(255 255 255 / 0.07) 5%, transparent 9%),
+    radial-gradient(130% 90% at 80% 0%, rgb(255 255 255 / 0.1), transparent 60%),
+    var(--c-bg);
+}
+.cover .ct {
+  font-family: var(--font-serif); font-size: 12.5cqi; line-height: 1.1; letter-spacing: -0.01em;
+  font-weight: 500; font-optical-sizing: auto; text-wrap: balance;
+  display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical; overflow: hidden;
+}
+.cover .rule { width: 16cqi; height: 1px; background: currentColor; opacity: 0.45; margin: 8cqi 0 0; flex: none; }
+.cover .ca {
+  margin-top: auto; font-size: 6.5cqi; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase;
+  opacity: 0.78; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.cover-xs .cloth { padding: 18cqi 10cqi 10cqi 16cqi; }
+.cover-xs .ct { font-size: 17cqi; -webkit-line-clamp: 3; }
+.cover-xs .rule { display: none; }
+
+/* ==========================================================================
+   Chapter heading and ending (ReaderShell)
+   ========================================================================== */
+.chead {
+  max-width: var(--measure); margin: 0 auto;
+  padding: clamp(2.5rem, 9vh, 5.5rem) 0 clamp(2rem, 5vh, 3rem);
+  text-align: center;
+}
+.chead .eyebrow { margin-bottom: var(--s-4); color: var(--ink-3); letter-spacing: 0.18em; }
+.chead .of { color: var(--ink-4); font-weight: 500; }
+.chead .ctitle {
+  margin: 0; font-family: var(--font-serif); font-weight: 500;
+  font-size: clamp(1.85rem, 1.3rem + 2.4vw, 2.9rem); line-height: 1.08; letter-spacing: -0.022em;
+  font-optical-sizing: auto; text-wrap: balance; color: var(--ink);
+}
+.chead .cmeta {
+  display: flex; flex-wrap: wrap; justify-content: center; gap: var(--s-1) var(--s-3);
+  margin: var(--s-5) 0 0; font-size: var(--t-caption); color: var(--ink-3);
+}
+.chead .cmeta span { white-space: nowrap; }
+.chead .cmeta span + span::before { content: '·'; margin-right: var(--s-3); color: var(--ink-4); }
+
+.cend {
+  max-width: var(--measure); margin: 0 auto;
+  padding: var(--s-6) 0 clamp(8rem, 30vh, 14rem);
+  display: grid; gap: var(--s-6);
+}
+.cend .fin { display: flex; justify-content: center; color: var(--ink-4); margin: 0; }
+.nextcard {
+  position: relative; display: grid; gap: var(--s-2);
+  padding: var(--s-6) calc(var(--s-6) + 2.5rem) var(--s-6) var(--s-6);
+  border-radius: var(--r-lg); background: var(--surface); border: 1px solid var(--rule);
+  color: var(--ink); text-decoration: none;
+  transition: transform var(--dur-2) var(--ease-spring), border-color var(--dur-2), background-color var(--dur-2);
+}
+.nextcard:hover { border-color: var(--rule-strong); background: color-mix(in oklab, var(--surface) 70%, var(--surface-2)); }
+.nextcard:active { transform: scale(0.99); }
+.nextcard .nt { font-family: var(--font-serif); font-size: clamp(1.3rem, 1.1rem + 0.8vw, 1.6rem); font-weight: 500; line-height: 1.2; letter-spacing: -0.014em; }
+.nextcard .go {
+  position: absolute; right: var(--s-6); top: 50%; transform: translateY(-50%);
+  display: grid; place-items: center; width: 2.5rem; height: 2.5rem; border-radius: var(--r-round);
+  background: var(--ink); color: var(--bg);
+  transition: transform var(--dur-3) var(--ease-spring);
+}
+.nextcard:hover .go { transform: translate(3px, -50%); }
+.cend .finished { text-align: center; display: grid; gap: var(--s-3); justify-items: center; padding: var(--s-6) 0; }
+.cend .finished .ft { margin: 0; font-family: var(--font-serif); font-size: 1.4rem; line-height: 1.3; }
+.cend .finished .acts { display: flex; gap: var(--s-3); flex-wrap: wrap; justify-content: center; margin-top: var(--s-3); }
+.cend .sub { display: flex; justify-content: space-between; gap: var(--s-4); }
+
+/* ==========================================================================
+   Book page (local /novel and published /n/[slug])
+   ========================================================================== */
+.bookpage { max-width: 62rem; margin-inline: auto; padding: clamp(1.5rem, 4vw, 3rem) var(--gutter) 7rem; }
+.bookhero {
+  display: grid; grid-template-columns: clamp(8.5rem, 22vw, 13.5rem) minmax(0, 1fr);
+  gap: clamp(1.5rem, 4.5vw, 3.5rem); align-items: end;
+}
+.bookhero .cover { box-shadow: var(--shadow-cover), 0 30px 60px -30px #0008; }
+.bookhero .info { display: grid; gap: var(--s-3); min-width: 0; padding-bottom: var(--s-2); }
+.bookhero h1 { font-size: clamp(2rem, 1.3rem + 3vw, 3.4rem); overflow-wrap: anywhere; }
+.bookhero .byline { margin: 0; font-size: var(--t-title-3); color: var(--ink-2); }
+.bookhero .facts { display: flex; flex-wrap: wrap; gap: var(--s-1) var(--s-4); margin: 0; font-size: var(--t-caption); color: var(--ink-3); }
+.bookhero .facts span { display: inline-flex; align-items: center; gap: var(--s-2); }
+.bookhero .blurb { margin: var(--s-2) 0 0; max-width: 36rem; color: var(--ink-2); line-height: 1.6; }
+.bookhero .tags { display: flex; flex-wrap: wrap; gap: var(--s-2); }
+.bookhero .actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-3); margin-top: var(--s-4); }
+.tag { border: 1px solid var(--rule); border-radius: var(--r-round); padding: 0.1rem 0.6rem; font-size: var(--t-caption); color: var(--ink-2); }
+
+/* Where you are, as a card: the chapter, how far, and one button. */
+.resume {
+  margin-top: var(--s-5); display: grid; gap: var(--s-3);
+  padding: var(--s-4) 0 0; border-top: 1px solid var(--rule);
+  max-width: 30rem;
+}
+.resume .rt { display: flex; justify-content: space-between; gap: var(--s-4); font-size: var(--t-caption); color: var(--ink-3); }
+.resume .rc { font-size: var(--t-callout); font-weight: 600; color: var(--ink); margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.booksec { margin-top: clamp(2.5rem, 7vw, 4rem); }
+.booksec > .sechead { padding-bottom: var(--s-3); }
+
+@media (max-width: 40rem) {
+  .bookhero { grid-template-columns: 1fr; justify-items: center; text-align: center; align-items: start; }
+  .bookhero .cover { width: 42vw; max-width: 11rem; }
+  .bookhero .info { justify-items: center; }
+  .bookhero .facts, .bookhero .tags, .bookhero .actions { justify-content: center; }
+  .bookhero .actions > .btn[data-variant='primary'] { flex: 1 1 100%; }
+  .resume { max-width: none; text-align: start; }
+}
+
+/* ==========================================================================
+   Shelves: the published grid on the landing page
+   ========================================================================== */
+.shelfgrid {
+  list-style: none; margin: var(--s-6) 0 0; padding: 0;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr)); gap: var(--s-7) var(--s-5);
+}
+.shelfgrid a { display: grid; gap: var(--s-3); text-decoration: none; color: var(--ink); }
+.shelfgrid .cover { transition: transform var(--dur-3) var(--ease-spring), box-shadow var(--dur-3) var(--ease-out); }
+.shelfgrid a:hover .cover { transform: translate3d(0, -4px, 0); box-shadow: var(--shadow-cover), 0 20px 36px -18px #000a; }
+.shelfgrid .t { font-size: var(--t-callout); font-weight: 600; line-height: 1.3; }
+@media (max-width: 26rem) { .shelfgrid { grid-template-columns: repeat(2, 1fr); gap: var(--s-6) var(--s-4); } }
+
+/* Page header shared by app screens: big title, a line under it, actions at the edge. */
+.pagehead { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--s-4) var(--s-6); flex-wrap: wrap; }
+.pagehead h1 { margin: 0; }
+.pagehead .sub { margin: var(--s-2) 0 0; }
+.pagehead .acts { display: flex; gap: var(--s-3); flex-wrap: wrap; }
+
+.lede { max-width: 34rem; color: var(--ink-2); font-size: 1.0625rem; line-height: 1.6; margin: var(--s-5) 0 var(--s-7); }
+.cta { display: flex; gap: var(--s-3); flex-wrap: wrap; }
+.cta.center { justify-content: center; }
+
+/* ---- library shelves (global: the shelf is built by a helper) ---- */
+.libgrid {
+  list-style: none; margin: 0; padding: 0;
+  display: grid; gap: var(--s-7) var(--s-5);
+  grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+}
+@media (min-width: 64rem) { .libgrid { grid-template-columns: repeat(auto-fill, minmax(10.5rem, 1fr)); } }
+@media (max-width: 26rem) { .libgrid { grid-template-columns: repeat(2, 1fr); gap: var(--s-6) var(--s-4); } }
+.liblist { list-style: none; margin: 0; padding: 0; }
+.liblist > li + li { box-shadow: 0 -1px 0 var(--rule); }
+
+/* ==========================================================================
+   Chapter manager (/novel/chapters) — global: rows are listed from a map, and
+   the same row language is what the editor's picker points back to.
+   ========================================================================== */
+.managepage { max-width: 50rem; margin-inline: auto; padding: clamp(1.5rem, 4vw, 3rem) var(--gutter) 7rem; }
+.managepage .pagehead { margin-bottom: var(--s-6); }
+.cm-tools { display: flex; flex-wrap: wrap; gap: var(--s-3); align-items: center; margin-bottom: var(--s-4); }
+.cm-tools .search { flex: 1 1 16rem; }
+.cm-hint { margin: 0 0 var(--s-4); display: flex; flex-wrap: wrap; gap: var(--s-1); align-items: center; }
+.cm-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--rule); }
+.cm-row {
+  display: flex; align-items: center; gap: var(--s-2); padding-right: var(--s-1);
+  border-bottom: 1px solid var(--rule);
+  content-visibility: auto; contain-intrinsic-size: auto 3.75rem;
+  transition: background-color var(--dur-2);
+}
+.cm-row:has([aria-expanded='true']) { content-visibility: visible; position: relative; z-index: 2; }  /* an open menu must not be clipped */
+.cm-open {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--s-5);
+  min-height: 3.75rem; padding: var(--s-3) var(--s-3);
+  color: var(--ink); text-decoration: none; border-radius: var(--r-sm);
+  transition: background-color var(--dur-2);
+}
+.cm-open:hover { background: var(--fill); }
+.cm-open:active { background: var(--fill-2); }
+.cm-num { flex: none; width: 2rem; text-align: right; font-size: var(--t-caption); color: var(--ink-3); }
+.cm-txt { flex: 1; min-width: 0; display: grid; gap: 0.15rem; }
+.cm-t {
+  font-family: var(--font-serif); font-size: 1.08rem; line-height: 1.3; letter-spacing: -0.005em;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.cm-meta { display: flex; align-items: center; gap: var(--s-3); font-size: var(--t-caption); color: var(--ink-3); }
+.cm-draft {
+  font-size: var(--t-micro); font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--ink-2); padding: 0.05rem 0.4rem; border: 1px solid var(--rule-strong); border-radius: var(--r-xs);
+}
+.cm-row[data-draft] .cm-t { color: var(--ink-2); font-style: italic; }
+.cm-move { display: flex; gap: var(--s-1); flex: none; }
+.cm-list[data-reorder] .cm-row { background: var(--surface); }
+.cm-list[data-reorder] .cm-row:focus-within { background: var(--fill-2); }

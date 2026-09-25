@@ -18,7 +18,12 @@ import { SAMPLE_ID, SAMPLE_NOVEL } from './sample-novel';
 // 'use client' module's exports can only be rendered on the server, never called.
 import { isRemoteId } from './routes';
 
-export type StoredChapter = { slug: string; title: string; ordinal: number; body: string; words: number };
+export type StoredChapter = {
+  slug: string; title: string; ordinal: number; body: string; words: number;
+  /** Still being written: hidden from the reader and its contents, shown in the editor.
+   *  Absent means ready — every chapter that existed before drafts did stays readable. */
+  draft?: boolean;
+};
 export type StoredNovel = {
   id: string;              // slug
   title: string;
@@ -211,4 +216,44 @@ export async function ensureSeeded(): Promise<void> {
     }))
   });
   await persist();
+}
+
+/* ---- undo ----
+   Everything a removal destroys, captured first, so "Undo" can put it all back —
+   the book, where you were in it, its bookmarks and the folder link. */
+export type Snapshot = {
+  novel?: StoredNovel; saved?: SavedNovel; progress?: Progress; bookmarks: Bookmark[]; handle?: unknown;
+};
+
+export async function snapshot(id: string): Promise<Snapshot> {
+  const remote = isRemoteId(id);
+  const [novel, saved, progress, bookmarks, handle] = await Promise.all([
+    remote ? undefined : getNovel(id),
+    remote ? getSaved(id) : undefined,
+    getProgress(id).catch(() => undefined),
+    listBookmarks().then(all => all.filter(b => b.novelId === id)).catch(() => [] as Bookmark[]),
+    remote ? undefined : getHandle(id).catch(() => undefined)
+  ]);
+  return { novel, saved, progress, bookmarks, handle };
+}
+
+/** Screens holding a copy of the library listen for this and reload — so an Undo raised
+ *  by one screen shows up on whichever screen is open when it's pressed. */
+const CHANGED = 'nr:library-changed';
+export const notifyChanged = () => window.dispatchEvent(new CustomEvent(CHANGED));
+export function onLibraryChanged(fn: () => void) {
+  window.addEventListener(CHANGED, fn);
+  return () => window.removeEventListener(CHANGED, fn);
+}
+
+export async function restore(s: Snapshot) {
+  if (s.novel) {
+    await putNovel(s.novel);
+    if (s.novel.id === SAMPLE_ID) localStorage.removeItem('nr:sample');
+  }
+  if (s.saved) await putSaved(s.saved);
+  if (s.progress) await saveProgress(s.progress);
+  for (const b of s.bookmarks) await putBookmark(b);
+  if (s.handle && s.novel) await putHandle(s.novel.id, s.handle).catch(() => {});
+  notifyChanged();
 }

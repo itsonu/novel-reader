@@ -22,7 +22,8 @@ export function md(src: string): string {
   for (let b of src.replace(/\r\n?/g, '\n').split(/\n{2,}/)) {
     b = b.replace(/\n+$/, '');
     if (!b.trim()) continue;
-    if (/^(---|\*\*\*|___)\s*$/.test(b.trim())) { out.push('<hr>'); continue; }
+    // Scene breaks: ---, ***, ___ and their spaced forms (* * *) — the way novelists type them.
+    if (/^([-*_])(\s*\1){2,}$/.test(b.trim())) { out.push('<hr>'); continue; }
     const h = b.match(/^(#{1,6})\s+(.*)$/);
     if (h) { out.push(`<h${h[1].length}>${inline(h[2])}</h${h[1].length}>`); continue; }
     if (/^>\s?/m.test(b) && b.split('\n').every(l => /^>/.test(l) || !l.trim())) {

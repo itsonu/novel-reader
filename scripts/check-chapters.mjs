@@ -3,7 +3,8 @@
 import assert from 'node:assert/strict';
 import {
   countWords, readingMinutes, orderedChapters, chapterIndex, draftSlug,
-  upsertChapter, removeChapter, moveChapter, chapterLabel
+  upsertChapter, removeChapter, moveChapter, chapterLabel,
+  readableChapters, setDraft, duplicateChapter
 } from '../lib/chapters.ts';
 
 const ch = (slug, ordinal, body = 'one two three') => ({
@@ -70,5 +71,25 @@ assert.deepEqual(moveChapter(novel, 1, 1).chapters.map(c => c.slug), ['a', 'b', 
 assert.deepEqual(moveChapter(novel, 0, 99).chapters.map(c => c.slug), ['b', 'c', 'a'], 'overshoot clamps to last');
 assert.deepEqual(moveChapter(novel, 0, -5).chapters.map(c => c.slug), ['a', 'b', 'c'], 'undershoot clamps to first');
 assert.deepEqual(moveChapter(novel, 9, 0).chapters.map(c => c.slug), ['a', 'b', 'c'], 'moving nothing changes nothing');
+
+/* --- drafts: hidden from readers, never lost --- */
+const drafted = setDraft(novel, 'b', true);
+assert.equal(drafted.chapters.find(c => c.slug === 'b').draft, true);
+assert.deepEqual(readableChapters(drafted).map(c => c.slug), ['a', 'c'], 'a draft is not in the reader');
+assert.deepEqual(orderedChapters(drafted).map(c => c.slug), ['a', 'b', 'c'], 'but keeps its place in the book');
+assert.equal('draft' in setDraft(drafted, 'b', false).chapters.find(c => c.slug === 'b'), false, 'ready removes the flag, not sets it false');
+assert.equal(upsertChapter(drafted, { slug: 'b', title: 'B2', body: 'x' }).chapters.find(c => c.slug === 'b').draft, true,
+  'saving a draft\'s text does not publish it');
+assert.equal(upsertChapter(novel, { slug: 'new', title: 'N', body: 'x', draft: true }).chapters.at(-1).draft, true);
+
+/* --- duplicate: lands right after, as a draft, with its own slug --- */
+const dup = duplicateChapter(novel, 'a', 5);
+assert.deepEqual(dup.novel.chapters.map(c => c.slug), ['a', dup.slug, 'b', 'c'], 'copy sits after the original');
+assert.equal(dup.novel.chapters[1].title, 'a (copy)');
+assert.equal(dup.novel.chapters[1].draft, true, 'a copy starts as a draft');
+assert.equal(dup.novel.chapters[1].body, 'one two three', 'with the same text');
+assert.deepEqual(dup.novel.chapters.map(c => c.ordinal), [1, 2, 3, 4], 'ordinals stay contiguous');
+assert.notEqual(duplicateChapter(dup.novel, 'a', 5).slug, dup.slug, 'duplicating twice never collides');
+assert.equal(duplicateChapter(novel, 'missing', 5).slug, '', 'duplicating nothing is a no-op');
 
 console.log('chapter rules: all checks passed');

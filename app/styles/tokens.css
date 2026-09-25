@@ -1,0 +1,199 @@
+/* ==========================================================================
+   Design tokens. Every colour, size, radius, shadow and duration in the app
+   comes from here. Component CSS picks from these; a one-off value in a
+   component is how a UI drifts out of rhythm one commit at a time.
+
+   Themes are set on <html data-theme>, before first paint, by the inline
+   script in app/layout.tsx (see lib/theme.ts). There is no "unthemed" state.
+   ========================================================================== */
+
+:root {
+  /* ---- type ----
+     --font-ui prefers the platform's own UI face (SF on Apple, Segoe on
+     Windows) and falls to Inter, which next/font self-hosts and only fetches
+     when nothing earlier in the stack matched. Prose gets a real book face on
+     every platform — the one place a system fallback visibly costs quality. */
+  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", var(--font-inter), system-ui, sans-serif;
+  --font-serif: var(--font-newsreader), "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  --font-legible: var(--font-atkinson), var(--font-ui);
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, monospace;
+  /* legacy aliases — older component CSS still says var(--serif)/var(--ui) */
+  --serif: var(--font-serif);
+  --ui: var(--font-ui);
+
+  /* Type scale. Size-specific tracking: tight on display, ~0 on body, open on
+     small caps. Inverse leading: the bigger the type, the tighter the lines. */
+  --t-hero: clamp(2.75rem, 1.5rem + 5vw, 5rem);
+  --t-display: clamp(2rem, 1.35rem + 2.6vw, 3.25rem);
+  --t-title-1: clamp(1.5rem, 1.25rem + 1vw, 2rem);
+  --t-title-2: 1.25rem;
+  --t-title-3: 1.0625rem;
+  --t-body: 0.9375rem;
+  --t-callout: 0.875rem;
+  --t-caption: 0.8125rem;
+  --t-micro: 0.6875rem;
+
+  /* ---- reading (user-adjustable; lib/reading.ts writes these) ---- */
+  --prose: 1.1875rem;          /* font size */
+  --prose-leading: 1.68;
+  --prose-font: var(--font-serif);
+  --measure: 36.8rem;          /* 31em of prose — ~66 characters at the default size */
+
+  /* ---- spacing: 4px base ---- */
+  --s-1: 0.25rem;   /* 4 */
+  --s-2: 0.375rem;  /* 6 */
+  --s-3: 0.5rem;    /* 8 */
+  --s-4: 0.75rem;   /* 12 */
+  --s-5: 1rem;      /* 16 */
+  --s-6: 1.5rem;    /* 24 */
+  --s-7: 2rem;      /* 32 */
+  --s-8: 3rem;      /* 48 */
+  --s-9: 4rem;      /* 64 */
+  --s-10: 6rem;     /* 96 */
+  --gutter: clamp(1rem, 0.5rem + 2.4vw, 2rem);
+  --page-max: 72rem;
+
+  /* ---- radii: each has a job, and nothing is round just because ---- */
+  --r-xs: 0.25rem;    /* chips inside controls, keys */
+  --r-sm: 0.375rem;     /* small controls, list rows */
+  --r-md: 0.5rem;      /* buttons, inputs */
+  --r-lg: 0.75rem;     /* cards, popovers */
+  --r-xl: 1rem;       /* sheets, dialogs, hero surfaces */
+  --r-cover: 0.3rem 0.55rem 0.55rem 0.3rem;   /* a book: spine side is tighter */
+  --r-round: 999px;
+  /* legacy aliases */
+  --r-tight: var(--r-xs);
+  --r-control: var(--r-md);
+  --r-panel: var(--r-lg);
+  --r-sheet: var(--r-xl);
+
+  /* ---- motion: fast, and eased like something with mass ---- */
+  --dur-1: 120ms;   /* press, hover */
+  --dur-2: 200ms;   /* small state changes */
+  --dur-3: 320ms;   /* panels, reveals */
+  --dur-4: 520ms;   /* page-level entrances */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-spring: cubic-bezier(0.32, 0.72, 0, 1);   /* Apple's sheet curve */
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --quick: var(--dur-2) var(--ease-spring);
+  --settle: 380ms var(--ease-spring);
+
+  /* ---- breakpoints (documentation — CSS can't read vars in @media) ----
+     phone ≤ 40rem (640) · tablet ≤ 64rem (1024) · laptop ≤ 80rem (1280) · desktop above.
+     Every @media in the app uses one of these four numbers. */
+
+  /* ---- z layers ---- */
+  --z-sticky: 20;
+  --z-crumb: 30;
+  --z-player: 40;
+  --z-scrim: 45;
+  --z-nav: 50;
+  --z-fx: 60;
+  --z-overlay: 80;
+  --z-sheet: 90;
+  --z-toast: 95;
+  --z-skip: 100;
+
+  --focus: 2px solid var(--focus-ring);
+  --focus-gap: 2px;
+}
+
+/* ==========================================================================
+   Dark — the default. A lamp-lit room, not a void: warm near-black, text at
+   ~13:1 rather than a glaring 21:1, and surfaces that step up in lightness
+   so elevation reads without heavy shadows.
+   ========================================================================== */
+:root,
+[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #1c1a17;               /* soft charcoal — ink, not void */
+  --bg-sunken: #171512;
+  --surface: #23201c;          /* cards, rows on hover */
+  --surface-2: #2b2723;        /* popovers, dialogs, menus */
+  --surface-3: #35302b;        /* pressed, selected */
+  --ink: #e2dacb;              /* 12.5:1 — bright enough to read, never glaring */
+  --ink-2: #b2a898;            /* secondary text — 7.4:1 */
+  --ink-3: #9a907f;            /* tertiary text — ≥4.5:1 on every surface */
+  --ink-4: #625a4f;            /* decorative only: rules, placeholders, numerals */
+  --rule: color-mix(in oklab, var(--ink) 10%, transparent);
+  --rule-strong: color-mix(in oklab, var(--ink) 17%, transparent);
+  --fill: color-mix(in oklab, var(--ink) 6%, transparent);
+  --fill-2: color-mix(in oklab, var(--ink) 10%, transparent);
+  --accent: #c9a57e;           /* muted sepia — a pencil mark, not a highlighter */
+  --accent-ink: #1c1a17;
+  --accent-soft: color-mix(in oklab, var(--accent) 13%, transparent);
+  --mark: color-mix(in oklab, var(--accent) 24%, transparent);
+  --focus-ring: color-mix(in oklab, var(--accent) 80%, var(--ink));
+  --chrome: color-mix(in oklab, var(--bg) 84%, transparent);
+  --scrim: color-mix(in oklab, #0b0a09 58%, transparent);
+
+  --ok: #93b58e;
+  --warn: #d2ad72;
+  --err: #e0917b;
+  --info: #97b3c9;
+  --ok-bg: color-mix(in oklab, var(--ok) 13%, transparent);
+  --err-bg: color-mix(in oklab, var(--err) 13%, transparent);
+
+  --shadow-1: 0 1px 2px #0005;
+  --shadow-2: 0 6px 18px -10px #0009, 0 0 0 1px var(--rule);
+  --shadow-3: 0 18px 44px -18px #000b, 0 0 0 1px var(--rule);
+  --shadow-cover: 0 1px 1px #0007, 0 8px 20px -8px #000b;
+  --e-1: 0 1px 0 var(--rule);
+  --e-2: var(--shadow-2);
+  --e-3: var(--shadow-3);
+  --e-4: 0 -18px 44px -18px #000b;
+
+  /* legacy aliases */
+  --paper: var(--bg);
+  --ink-dim: var(--ink-2);
+  --ink-faint: var(--ink-3);
+}
+
+/* ==========================================================================
+   Light — warm paper. Off-white with a little ochre in it, ink that is not
+   quite black, and shadows that read as contact rather than depth.
+   ========================================================================== */
+[data-theme='light'] {
+  color-scheme: light;
+  --bg: #f5f0e6;               /* warm paper */
+  --bg-sunken: #efe8db;
+  --surface: #faf6ee;
+  --surface-2: #fffcf6;
+  --surface-3: #e9e1d2;
+  --ink: #29231c;              /* iron-gall ink, not black */
+  --ink-2: #594f43;
+  --ink-3: #716656;
+  --ink-4: #a3978a;
+  --rule: color-mix(in oklab, var(--ink) 11%, transparent);
+  --rule-strong: color-mix(in oklab, var(--ink) 19%, transparent);
+  --fill: color-mix(in oklab, var(--ink) 5%, transparent);
+  --fill-2: color-mix(in oklab, var(--ink) 8.5%, transparent);
+  --accent: #86603a;           /* sepia */
+  --accent-ink: #fffcf6;
+  --accent-soft: color-mix(in oklab, var(--accent) 10%, transparent);
+  --mark: color-mix(in oklab, #c9a57e 40%, transparent);
+  --focus-ring: var(--accent);
+  --chrome: color-mix(in oklab, var(--bg) 82%, transparent);
+  --scrim: color-mix(in oklab, #29231c 32%, transparent);
+
+  --ok: #3d6e44;
+  --warn: #8a6410;
+  --err: #a53a26;
+  --info: #2f5f86;
+
+  --shadow-1: 0 1px 2px #3a2a1020;
+  --shadow-2: 0 6px 18px -12px #3a2a1038, 0 0 0 1px var(--rule);
+  --shadow-3: 0 18px 40px -20px #3a2a104a, 0 0 0 1px var(--rule);
+  --shadow-cover: 0 1px 1px #3a2a1026, 0 8px 18px -10px #3a2a1058;
+  --e-4: 0 -20px 44px -20px #3a2a1040;
+}
+
+@media (prefers-contrast: more) {
+  :root, [data-theme] {
+    --rule: color-mix(in oklab, var(--ink) 34%, transparent);
+    --rule-strong: color-mix(in oklab, var(--ink) 50%, transparent);
+    --ink-2: var(--ink);
+    --ink-3: color-mix(in oklab, var(--ink) 82%, var(--bg));
+    --chrome: var(--bg);
+  }
+}

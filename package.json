@@ -11,14 +11,14 @@
     "deploy": "npm run build:pages && node scripts/deploy-pages.mjs",
     "preview:static": "npm run build:static && npx serve out",
     "lint": "next lint",
-    "check": "node scripts/check-library.mjs && node scripts/check-chapters.mjs && node scripts/check-sync.mjs && node scripts/check-timing.mjs"
+    "check": "node scripts/check-library.mjs && node scripts/check-chapters.mjs && node scripts/check-sync.mjs && node scripts/check-timing.mjs",
+    "test:e2e": "node scripts/e2e.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",
     "@supabase/supabase-js": "^2.45.4",
     "driver.js": "^1.8.0",
     "kokoro-js": "^1.2.1",
-    "motion": "^11.11.17",
     "next": "^15.0.3",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

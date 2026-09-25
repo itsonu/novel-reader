@@ -218,11 +218,12 @@ export default function Player({
       <style jsx>{`
         .player {
           position: fixed; inset: auto 0 0 0; z-index: var(--z-player);
-          padding: 0 0 env(safe-area-inset-bottom);
+          padding: 0 max(0px, env(safe-area-inset-right)) env(safe-area-inset-bottom) max(0px, env(safe-area-inset-left));
+          box-shadow: 0 -1px 0 var(--rule);
         }
         /* scrubber */
         .scrub { padding: 0.55rem 0.9rem 0.2rem; cursor: pointer; touch-action: none; }
-        .track { position: relative; height: 3px; border-radius: 2px; background: color-mix(in oklab, var(--ink) 18%, transparent); }
+        .track { position: relative; height: 3px; border-radius: 2px; background: var(--fill-2); }
         .fill {
           position: absolute; inset: 0; transform-origin: left center;
           background: var(--accent); border-radius: 2px;
@@ -246,13 +247,14 @@ export default function Player({
         .ctl {
           display: grid; place-items: center; width: 2.4rem; height: 2.4rem;
           background: transparent; border: 0; border-radius: 999px;
-          color: var(--ink); cursor: pointer;
-          transition: background-color var(--quick), transform var(--quick), color var(--quick);
+          color: var(--ink-2); cursor: pointer;
+          transition: background-color var(--quick), transform var(--dur-1) var(--ease-spring), color var(--quick);
         }
-        .ctl:hover { background: color-mix(in oklab, var(--ink) 9%, transparent); }
+        .ctl:hover { background: var(--fill); color: var(--ink); }
         .ctl:active { transform: scale(0.9); }
         .ctl:disabled { opacity: 0.4; cursor: default; }
-        .ctl.primary { width: 2.8rem; height: 2.8rem; }
+        .ctl.primary { width: 2.8rem; height: 2.8rem; background: var(--ink); color: var(--bg); }
+        .ctl.primary:hover { background: color-mix(in oklab, var(--ink) 88%, var(--bg)); color: var(--bg); }
         .ctl.on { color: var(--accent); }
         .ctl.upgrade { color: var(--accent); }
         .pct { font-size: 0.7rem; }

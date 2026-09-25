@@ -1,5 +1,6 @@
 'use client';
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useId, useRef } from 'react';
+import { useModal } from '@/lib/ui';
 
 /**
  * Bottom sheet with real gesture physics.
@@ -10,21 +11,38 @@ import { useCallback, useEffect, useRef } from 'react';
  * the settle animation so there's no seam; stay interruptible — grabbing a settling
  * sheet re-grabs it from its live position.
  *
- * ponytail: hand-rolled rather than pulling in a sheet library. ~120 lines, and the
- * spring below is the only physics in the app.
+ * Every way out (Done, Escape, the scrim, a flick) goes through the same spring, so a
+ * sheet never just blinks out. On wide screens it becomes a popover anchored where its
+ * trigger lives: above the transport ('player') or under the top bar ('top').
+ *
+ * ponytail: hand-rolled rather than pulling in a sheet library. The spring below is the
+ * only physics in the app.
  */
 export default function Sheet({
-  open, onClose, title, children
-}: { open: boolean; onClose: () => void; title: string; children: React.ReactNode }) {
+  open, onClose, title, children, placement = 'player'
+}: {
+  open: boolean; onClose: () => void; title: string; children: React.ReactNode;
+  placement?: 'player' | 'top';
+}) {
   const panel = useRef<HTMLDivElement>(null);
   const scrim = useRef<HTMLDivElement>(null);
   const drag = useRef({ active: false, startY: 0, startOffset: 0, y: 0, vy: 0, lastT: 0, lastY: 0 });
   const anim = useRef(0);
+  const id = useId();
 
   const height = () => panel.current?.offsetHeight || 1;
+  const isPopover = () => matchMedia('(min-width: 48rem)').matches;
   const setY = (y: number) => {
     if (!panel.current) return;
-    panel.current.style.transform = `translate3d(0, ${y}px, 0)`;
+    if (isPopover()) {
+      // A popover doesn't travel the height of the screen; it settles in place.
+      const k = Math.min(1, Math.max(0, y / height()));
+      panel.current.style.transform = `translate3d(0, ${k * (placement === 'top' ? -10 : 10)}px, 0) scale(${1 - k * 0.03})`;
+      panel.current.style.opacity = String(1 - k);
+    } else {
+      panel.current.style.transform = `translate3d(0, ${y}px, 0)`;
+      panel.current.style.opacity = '1';
+    }
     // scrim tops out at 0.5 — a full-black overlay hides the page it's dimming
     if (scrim.current) scrim.current.style.opacity = String(Math.max(0, 1 - y / height()) * 0.5);
   };
@@ -47,27 +65,32 @@ export default function Sheet({
       anim.current = requestAnimationFrame(step);
     };
     anim.current = requestAnimationFrame(step);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* Open/close animation keys on `open` ALONE.
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+
+  /** The one way out: spring off, then tell the parent. */
+  const dismiss = useCallback((velocity = 0) => {
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) { closeRef.current(); return; }
+    springTo(height(), velocity, () => closeRef.current());
+  }, [springTo]);
+
+  useModal(panel, open, () => dismiss());
+
+  /* Open animation keys on `open` ALONE.
      It used to depend on onClose, whose identity changes every parent render — so
      picking any option re-ran this effect, which reset the panel to off-screen and
      re-animated it. The option had in fact been applied; the sheet just slid back
      over it, which read as "nothing happens". */
-  const closeRef = useRef(onClose);
-  closeRef.current = onClose;
-
   useEffect(() => {
     if (!open || !panel.current) return;
     const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
     drag.current.y = reduce ? 0 : height();
     setY(drag.current.y);
     requestAnimationFrame(() => (reduce ? setY(0) : springTo(0)));
-    const esc = (e: KeyboardEvent) => e.key === 'Escape' && closeRef.current();
-    window.addEventListener('keydown', esc);
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => { window.removeEventListener('keydown', esc); document.body.style.overflow = prev; };
+    return () => cancelAnimationFrame(anim.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
@@ -75,6 +98,7 @@ export default function Sheet({
   // retargets subsequent events to it and swallows the click on every row inside —
   // which is exactly how the options stopped responding.
   const onPointerDown = (e: React.PointerEvent) => {
+    if ((e.target as HTMLElement).closest('button')) return;   // Done is a button, not a grip
     cancelAnimationFrame(anim.current);
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     drag.current = {
@@ -102,16 +126,23 @@ export default function Sheet({
     d.active = false;
     // project where the flick is going (Apple's deceleration form), then decide
     const projected = d.y + (d.vy / 1000) * 0.998 / (1 - 0.998);
-    if (projected > height() * 0.4) springTo(height(), d.vy, onClose);
+    if (projected > height() * 0.4) dismiss(d.vy);
     else springTo(0, d.vy);
   };
 
   if (!open) return null;
 
   return (
-    <div className="root" role="dialog" aria-modal="true" aria-label={title}>
-      <div ref={scrim} className="scrim" onClick={onClose} />
-      <div ref={panel} className="panel chrome">
+    <div className="root" data-placement={placement}>
+      <div ref={scrim} className="scrim" aria-hidden onClick={() => dismiss()} />
+      <div
+        ref={panel}
+        className="panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={`${id}-t`}
+        tabIndex={-1}
+      >
         <div
           className="dragzone"
           onPointerDown={onPointerDown}
@@ -121,8 +152,8 @@ export default function Sheet({
         >
           <div className="grip" aria-hidden />
           <header>
-            <h2 className="title">{title}</h2>
-            <button className="btn" data-variant="ghost" onClick={onClose}>Done</button>
+            <h2 id={`${id}-t`} className="title-3">{title}</h2>
+            <button className="btn" data-variant="ghost" data-size="sm" onClick={() => dismiss()}>Done</button>
           </header>
         </div>
         <div className="body" data-sheet-scroll>{children}</div>
@@ -135,43 +166,41 @@ export default function Sheet({
           position: absolute; left: 0; right: 0; bottom: 0;
           width: min(34rem, 100%); margin-inline: auto;
           transform: translate3d(0, 100%, 0);
-          border-radius: var(--r-sheet) var(--r-sheet) 0 0;
-          max-height: min(78vh, 40rem); display: flex; flex-direction: column;
-          will-change: transform;
-          box-shadow: 0 -1px 0 color-mix(in oklab, var(--ink) 12%, transparent),
-                      var(--e-4);
+          background: var(--surface-2);
+          border-radius: var(--r-xl) var(--r-xl) 0 0;
+          max-height: min(82dvh, 44rem); display: flex; flex-direction: column;
+          will-change: transform; outline: none;
+          box-shadow: 0 -1px 0 var(--rule), var(--e-4);
         }
-        /* Desktop: a popover anchored bottom-right above the control bar, the way a
-           media player puts its settings — not a modal drawer across the whole screen. */
+        /* Desktop: a popover anchored where its trigger is, not a drawer across the screen. */
         @media (min-width: 48rem) {
           .panel {
-            left: auto; right: 1rem; bottom: 5.25rem;
-            width: min(23rem, calc(100vw - 2rem)); margin-inline: 0;
-            border-radius: 1rem; max-height: min(70vh, 32rem);
-            box-shadow: 0 1px 0 color-mix(in oklab, var(--ink) 10%, transparent) inset,
-                        0 24px 60px -12px #000c;
+            left: auto; right: var(--s-5); bottom: 5.5rem;
+            width: min(24rem, calc(100vw - 2rem)); margin-inline: 0;
+            border-radius: var(--r-xl); max-height: min(72vh, 36rem);
+            box-shadow: var(--shadow-3);
+            transform-origin: bottom right;
           }
+          .root[data-placement='top'] .panel { bottom: auto; top: calc(3.5rem + var(--s-2)); transform-origin: top right; }
           .scrim { background: transparent; }
           .grip { display: none; }
+          .dragzone { cursor: default; }
         }
         .dragzone { touch-action: none; cursor: grab; flex: none; }
         .dragzone:active { cursor: grabbing; }
         .grip {
-          width: 2.25rem; height: 0.25rem; border-radius: 999px; margin: 0.6rem auto 0;
-          background: color-mix(in oklab, var(--ink) 26%, transparent);
+          width: 2.25rem; height: 0.3rem; border-radius: 999px; margin: 0.55rem auto 0;
+          background: color-mix(in oklab, var(--ink) 24%, transparent);
         }
         header {
           display: flex; align-items: center; justify-content: space-between;
-          padding: 0.7rem 1rem 0.55rem;
+          padding: var(--s-3) var(--s-4) var(--s-3) var(--s-6);
         }
         header h2 { margin: 0; }
         .body {
           overflow-y: auto; overscroll-behavior: contain;
-          padding: 0 0.6rem calc(1rem + env(safe-area-inset-bottom));
+          padding: 0 var(--s-4) calc(var(--s-5) + env(safe-area-inset-bottom));
           -webkit-overflow-scrolling: touch;
-        }
-        @media (prefers-reduced-motion: reduce) {
-          .panel { transition: none; }
         }
       `}</style>
     </div>

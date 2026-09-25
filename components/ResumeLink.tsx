@@ -16,7 +16,7 @@ export default function ResumeLink() {
   useEffect(() => { lastRead().then(r => setP(r ?? null)).catch(() => {}); }, []);
 
   return (
-    <Link href={p?.href ?? '/library'} className="btn" data-variant="primary">
+    <Link href={p?.href ?? '/library'} className="btn" data-variant="primary" data-size="lg">
       {p ? `Continue ${p.title}` : 'Start reading'}
     </Link>
   );

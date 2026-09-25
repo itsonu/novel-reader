@@ -31,7 +31,7 @@ export async function runTour(force = false) {
       element: '.scrub',
       popover: {
         title: 'Scrub anywhere',
-        description: 'Drag to move through the chapter. You can also click any word in the text to start reading from there.'
+        description: 'Drag to move through the chapter. With a mouse you can also click any word to start reading from there.'
       }
     },
     {
@@ -49,10 +49,17 @@ export async function runTour(force = false) {
       }
     },
     {
+      element: '[data-tour="type"]',
+      popover: {
+        title: 'Make the page yours',
+        description: 'Light or dark, text size, typeface, spacing and line length. Scroll down and the controls step aside; scroll up and they’re back.'
+      }
+    },
+    {
       element: '[data-tour="library"]',
       popover: {
-        title: 'Your library',
-        description: 'The chapter list, and the way back to this book and to everything else you’ve added. Nothing leaves your device.'
+        title: 'Contents',
+        description: 'Every chapter, with where you are and what you’ve read. ← and → move between chapters; on a phone, swipe.'
       }
     }
   ].filter(s => document.querySelector(s.element));

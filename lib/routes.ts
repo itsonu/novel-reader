@@ -5,7 +5,8 @@
 //
 //   /                         discover — published novels and what the app is
 //   /library                  the reader's own shelf (?tab=favorites|bookmarks|history)
-//   /novel?id=<id>            a local novel's page
+//   /novel?id=<id>            a local novel's page (reading side)
+//   /novel/chapters?id=<id>   the same novel's chapters (writing side: order, drafts)
 //   /read?novel=<id>&chapter=<slug>   the local reader
 //   /write?novel=<id>&chapter=<slug>  the chapter editor (chapter=new for a fresh one)
 //   /n/<slug>                 a published novel's page
@@ -26,6 +27,7 @@ export const PUBLISH = '/publish';
 
 export const libraryTabHref = (tab: string) => (tab === 'all' ? LIBRARY : `${LIBRARY}?tab=${tab}`);
 export const localNovelHref = (id: string) => `/novel?id=${encodeURIComponent(id)}`;
+export const chaptersHref = (id: string) => `/novel/chapters?id=${encodeURIComponent(id)}`;
 export const localChapterHref = (id: string, chapter: string) =>
   `/read?novel=${encodeURIComponent(id)}&chapter=${encodeURIComponent(chapter)}`;
 /** The editor is one screen. "new" is a chapter that has no slug yet, not a second route. */

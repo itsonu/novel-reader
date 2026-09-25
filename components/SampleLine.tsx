@@ -70,7 +70,7 @@ export default function SampleLine() {
         .demo::before {
           content: ''; position: absolute; inset: -1px; border-radius: inherit;
           pointer-events: none; z-index: -1;
-          background: radial-gradient(60% 80% at 50% 0%, color-mix(in oklab, var(--accent) 16%, transparent), transparent 70%);
+          background: color-mix(in oklab, var(--accent) 5%, transparent);
           opacity: 0; transition: opacity 900ms ease-out;
         }
         .demo[data-live='true']::before { opacity: 1; }

@@ -1,0 +1,61 @@
+/* ==========================================================================
+   Prose. The one thing on screen that matters; everything else yields to it.
+   Size, leading, measure and face are reader settings (lib/reading.ts), so
+   they're variables here rather than values.
+   ========================================================================== */
+
+.prose {
+  font-family: var(--prose-font);
+  font-size: var(--prose);
+  line-height: var(--prose-leading);
+  letter-spacing: 0.002em;
+  max-width: var(--measure);
+  margin-inline: auto;
+  color: var(--ink);
+  hanging-punctuation: first last;
+  font-optical-sizing: auto;
+  font-kerning: normal;
+  font-variant-ligatures: common-ligatures;
+  text-wrap: pretty;
+  overflow-wrap: break-word;
+}
+[data-justify='true'] .prose { text-align: justify; hyphens: auto; -webkit-hyphens: auto; }
+
+/* Paragraph rhythm: a space between paragraphs, like the web; no indent. The
+   gap follows the leading, so it scales with the reader's choices. */
+.prose p { margin: 0 0 calc(var(--prose-leading) * 0.56em); }
+/* The opening line is set in small caps, the way a printed chapter begins — quieter
+   than a drop cap, and it can't collide with the word highlight or a leading quote. */
+.prose > p:first-child::first-line {
+  font-variant-caps: small-caps; letter-spacing: 0.045em;
+}
+.prose h1 { font-size: 1.55em; line-height: 1.15; letter-spacing: -0.02em; margin: 0 0 1em; font-weight: 600; }
+.prose h2 { font-size: 1.22em; line-height: 1.25; letter-spacing: -0.012em; margin: 2.2em 0 0.7em; font-weight: 600; }
+.prose h3 { font-size: 1.06em; line-height: 1.3; margin: 1.8em 0 0.6em; font-weight: 600; }
+.prose blockquote {
+  margin: 1.6em 0; padding-inline-start: 1.1em;
+  border-inline-start: 2px solid color-mix(in oklab, var(--accent) 55%, transparent);
+  color: var(--ink-2); font-style: italic;
+}
+.prose ul, .prose ol { padding-inline-start: 1.3em; margin: 0 0 1.1em; }
+.prose li { margin: 0.3em 0; }
+/* Scene break: an asterism set in the text face, the mark the writer typed. */
+.prose hr {
+  border: 0; height: auto; margin: 2em auto; text-align: center; overflow: visible;
+  color: var(--ink-3);
+}
+.prose hr::before { content: '*\2003*\2003*'; font-size: 0.95em; letter-spacing: 0; }
+.prose em { font-style: italic; }
+.prose strong { font-weight: 650; }
+.prose a { color: inherit; text-decoration-color: color-mix(in oklab, var(--accent) 60%, transparent); text-underline-offset: 0.16em; }
+.prose code { font-family: var(--font-mono); font-size: 0.86em; background: var(--fill); padding: 0.1em 0.3em; border-radius: var(--r-xs); }
+.prose img { max-width: 100%; height: auto; border-radius: var(--r-md); margin: 1.5em auto; }
+
+/* ---- the spoken word ---- */
+.w { border-radius: 0.18em; transition: background-color 90ms linear, color 90ms linear, box-shadow 90ms linear; }
+.w.is-spoken { background: var(--mark); box-shadow: 0 0 0 0.14em var(--mark); }
+.w.is-said { color: var(--ink-2); }
+/* Clicking a word reads from there — but only say so with the cursor where a
+   mouse is the pointer; on touch a tap is a tap. */
+@media (pointer: fine) { [data-narrating] .prose .w { cursor: pointer; } }
+@media (prefers-reduced-motion: reduce) { .w { transition: none; } }

@@ -3,44 +3,54 @@
 // The published equivalent is /n/[slug]; this is the same room for a book that only
 // exists on this device, so the reading flow is identical either way.
 
-import { Suspense, useCallback, useEffect, useState } from 'react';
+import { Suspense, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import ConfirmDialog from '@/components/ConfirmDialog';
+import Dialog from '@/components/Dialog';
+import Cover from '@/components/Cover';
+import Icon from '@/components/Icon';
+import Menu from '@/components/Menu';
+import ChapterList from '@/components/ChapterList';
+import { toast } from '@/components/Toaster';
 import {
-  deleteBookmark, deleteNovel, getNovel, getProgress, listBookmarks, setFavorite,
-  type Bookmark, type Progress, type StoredNovel
+  deleteBookmark, deleteNovel, putBookmark, putNovel,
+  restore, setFavorite, snapshot, type Bookmark, type StoredNovel
 } from '@/lib/library';
-import { chapterEditHref, chapterNewHref, localChapterHref } from '@/lib/routes';
+import { chapterEditHref, chapterNewHref, chaptersHref, localChapterHref } from '@/lib/routes';
+import { orderedChapters, readableChapters } from '@/lib/chapters';
+import { useLocalNovel } from '@/lib/useNovel';
 import { linkState, refreshFromFolder, type LinkState } from '@/lib/import';
+import { ago, isTyping, readTime } from '@/lib/ui';
+
+function BookSkeleton() {
+  return (
+    <main className="bookpage" aria-busy="true">
+      <span className="sr-only" role="status">Opening the book…</span>
+      <div className="bookhero">
+        <span className="skel" style={{ aspectRatio: '2/3', borderRadius: 'var(--r-cover)' }} />
+        <div className="info">
+          <span className="skel" style={{ width: '60%', height: '2.6rem' }} />
+          <span className="skel" style={{ width: '30%', height: '1rem' }} />
+          <span className="skel" style={{ width: '45%', height: '0.8rem' }} />
+          <span className="skel" style={{ width: '10rem', height: '2.5rem', marginTop: '1rem', borderRadius: 'var(--r-md)' }} />
+        </div>
+      </div>
+      <div className="booksec" style={{ display: 'grid', gap: '0.6rem' }}>
+        {Array.from({ length: 6 }, (_, i) => <span key={i} className="skel" style={{ height: '2.8rem' }} />)}
+      </div>
+    </main>
+  );
+}
 
 function NovelBody() {
   const router = useRouter();
   const id = useSearchParams().get('id') ?? '';
-  const [phase, setPhase] = useState<'loading' | 'ready' | 'missing'>('loading');
-  const [novel, setNovel] = useState<StoredNovel | null>(null);
-  const [progress, setProgress] = useState<Progress | null>(null);
-  const [marks, setMarks] = useState<Bookmark[]>([]);
+  const { phase, novel, progress, marks, setMarks, setNovel, load } = useLocalNovel(id);
   const [confirming, setConfirming] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [link, setLink] = useState<LinkState>('none');
   const [syncing, setSyncing] = useState(false);
-  const [note, setNote] = useState('');
-
-  const load = useCallback(async () => {
-    if (!id) { setPhase('missing'); return; }
-    try {
-      const n = await getNovel(id);
-      if (!n) { setPhase('missing'); return; }
-      setNovel(n);
-      setProgress((await getProgress(id)) ?? null);
-      setMarks((await listBookmarks()).filter(b => b.novelId === id).sort((a, b) => b.at - a.at));
-      setPhase('ready');
-    } catch {
-      setPhase('missing');
-    }
-  }, [id]);
-
-  useEffect(() => { void load(); }, [load]);
 
   /* Is this book still wired to a folder on disk, and may we read it without asking? */
   useEffect(() => { if (id) linkState(id).then(setLink).catch(() => setLink('none')); }, [id]);
@@ -53,18 +63,17 @@ function NovelBody() {
     (async () => {
       const r = await refreshFromFolder(id, false);
       if (!live || !r || !('note' in r) || r.note === 'Already up to date.') return;
-      setNote(r.note);
+      toast({ message: r.note, tone: 'ok' });
       await load();
     })();
     return () => { live = false; };
   }, [link, id, load]);
 
-  /* Cmd/Ctrl+N writes a new chapter. Same destination as both Add buttons — one
-     editor, three ways in. Skipped while typing so it can't fire from a text field. */
+  /* N writes a new chapter (and Cmd/Ctrl+N where the browser lets a page have it). */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'n' || e.shiftKey) return;
-      if ((e.target as HTMLElement).matches('input, textarea')) return;
+      if (isTyping(e) || document.querySelector('[aria-modal="true"]')) return;
+      if (e.key.toLowerCase() !== 'n' || e.shiftKey || e.altKey) return;
       e.preventDefault();
       router.push(chapterNewHref(id));
     };
@@ -72,197 +81,221 @@ function NovelBody() {
     return () => window.removeEventListener('keydown', onKey);
   }, [router, id]);
 
-  if (phase === 'loading')
-    return <main className="wrap"><p className="caption" aria-live="polite">Opening…</p></main>;
+  // The reading side shows what a reader gets: drafts stay on the Chapters page.
+  const chapters = useMemo(() => (novel ? readableChapters(novel) : []), [novel]);
+  const drafts = novel ? orderedChapters(novel).length - chapters.length : 0;
+  const rows = useMemo(() => chapters.map(c => ({
+    slug: c.slug, title: c.title, words: c.words,
+    href: localChapterHref(id, c.slug), editHref: chapterEditHref(id, c.slug)
+  })), [chapters, id]);
+  const markedSlugs = useMemo(() => new Set(marks.map(m => m.chapterSlug)), [marks]);
+
+  if (phase === 'loading') return <BookSkeleton />;
 
   if (phase === 'missing' || !novel)
     return (
       <main className="wrap">
-        <h1 className="display">Not in your library</h1>
-        <p className="lede">
-          That book isn&apos;t on this device — it may have been removed, or opened in a
-          different browser.
-        </p>
-        <div className="cta">
-          <Link href="/library" className="btn" data-variant="primary">Go to your library</Link>
-          <Link href="/" className="btn">Browse published novels</Link>
+        <div className="empty">
+          <span className="glyph"><Icon name="book" size={26} /></span>
+          <h1 className="title">Not in your library</h1>
+          <p>That book isn’t on this device — it may have been removed, or opened in a different browser.</p>
+          <div className="actions">
+            <Link href="/library" className="btn" data-variant="primary">Go to your library</Link>
+            <Link href="/" className="btn">Discover</Link>
+          </div>
         </div>
       </main>
     );
 
-  const chapters = [...novel.chapters].sort((a, b) => a.ordinal - b.ordinal);
   const words = chapters.reduce((s, c) => s + c.words, 0);
   const at = progress?.chapterIndex ?? -1;
   const pct = Math.round((progress?.percent ?? 0) * 100);
-  const resume = progress?.href ?? (chapters[0] ? localChapterHref(novel.id, chapters[0].slug) : '/library');
+  const resume = progress?.href ?? (chapters[0] ? localChapterHref(novel.id, chapters[0].slug) : chapterNewHref(novel.id));
 
   const toggleFav = async () => {
     const on = !novel.favorite;
     setNovel({ ...novel, favorite: on });
-    try { await setFavorite(novel.id, on); } catch { await load(); }
+    try {
+      await setFavorite(novel.id, on);
+      toast({ message: on ? 'Added to favourites' : 'Removed from favourites' });
+    } catch { await load(); }
   };
 
   const remove = async () => {
     setConfirming(false);
+    const snap = await snapshot(novel.id);
     await deleteNovel(novel.id);
     router.push('/library');
+    toast({
+      message: `Removed “${novel.title}”`,
+      action: { label: 'Undo', onClick: async () => { await restore(snap); router.push(`/novel?id=${encodeURIComponent(novel.id)}`); } }
+    });
   };
 
   /* Must run straight off the click: renewing folder permission is only allowed
      inside a user gesture, so this can never be moved into an effect. */
   const sync = async () => {
     setSyncing(true);
-    setNote('');
     const r = await refreshFromFolder(novel.id, true);
     setSyncing(false);
-    if (!r) { setNote('This book has no folder linked to it.'); return; }
-    setNote('error' in r ? r.error : r.note);
+    if (!r) { toast({ message: 'This book has no folder linked to it.' }); return; }
+    toast({ message: 'error' in r ? r.error : r.note, tone: 'error' in r ? 'err' : 'ok' });
     setLink(await linkState(novel.id));
     if (!('error' in r)) await load();
   };
 
+  const dropMark = async (b: Bookmark) => {
+    setMarks(m => m.filter(x => x.id !== b.id));
+    try {
+      await deleteBookmark(b.id);
+      toast({
+        message: 'Bookmark removed',
+        action: { label: 'Undo', onClick: async () => { await putBookmark(b); setMarks(m => [b, ...m].sort((x, y) => y.at - x.at)); } }
+      });
+    } catch { await load(); }
+  };
+
   return (
     <>
-      <nav className="crumb chrome" aria-label="Breadcrumb">
-        <Link href="/library" className="btn" data-variant="ghost">← Library</Link>
-        <span className="caption mono">{chapters.length} chapters</span>
-      </nav>
+      <main className="bookpage">
+        <nav className="backline" aria-label="Breadcrumb">
+          <Link href="/library" className="btn" data-variant="ghost" data-size="sm"><Icon name="back" size={16} /> Library</Link>
+        </nav>
 
-      <main className="wrap">
-        <header className="hero">
-          <span className="cover" aria-hidden>{novel.title.slice(0, 1)}</span>
-          <div className="det">
+        <header className="bookhero">
+          <Cover title={novel.title} author={novel.author} size="lg" />
+          <div className="info">
+            {novel.genre && <p className="eyebrow">{novel.genre}</p>}
             <h1 className="display">{novel.title}</h1>
-            <p className="title byline">{novel.author || 'On this device'}</p>
-            <p className="caption meta mono">
-              {chapters.length} chapters · {words.toLocaleString()} words · offline
+            <p className="byline">{novel.author || 'On this device'}</p>
+            <p className="facts">
+              <span>{chapters.length} {chapters.length === 1 ? 'chapter' : 'chapters'}</span>
+              <span>{words.toLocaleString()} words</span>
+              {words > 0 && <span><Icon name="clock" size={14} />{readTime(words)}</span>}
+              <span><Icon name="download" size={14} />Offline</span>
             </p>
 
             {/* Says what is actually true of this book's folder, including the cases
                 where reconnecting is impossible. */}
             {link !== 'none' && (
-              <p className="caption folder" data-state={link}>
-                {link === 'linked' && 'Linked to a folder on this device — refreshes automatically.'}
-                {link === 'needs-permission' &&
-                  'Linked to a folder. Your browser needs one click to read it again.'}
-                {link === 'unsupported' &&
-                  'Saved as a copy on this device. This browser can’t keep a live folder link.'}
+              <p className="caption" style={{ margin: 0, color: link === 'needs-permission' ? 'var(--warn)' : 'var(--ink-3)' }}>
+                <Icon name="folder" size={14} className="inl" />{' '}
+                {link === 'linked' && 'Linked to a folder — new chapters appear automatically.'}
+                {link === 'needs-permission' && 'Linked to a folder. Your browser needs one click to read it again.'}
+                {link === 'unsupported' && 'Saved as a copy. This browser can’t keep a live folder link.'}
               </p>
             )}
 
-            {note && (
-              <p className="caption sync" role="status">
-                {note}
-                <button className="linkish" onClick={() => setNote('')}>Dismiss</button>
-              </p>
-            )}
-
-            {pct > 0 && (
-              <div className="prog">
-                <span className="track" aria-hidden><span style={{ width: `${Math.max(3, pct)}%` }} /></span>
-                <p className="caption">
-                  {pct}% · {progress ? `Chapter ${progress.chapterIndex + 1} · ${progress.chapterTitle}` : ''}
-                </p>
-              </div>
-            )}
-
-            <div className="cta">
-              <Link href={resume} className="btn" data-variant="primary">
-                {pct > 0 ? 'Continue reading' : 'Start reading'}
+            <div className="actions">
+              <Link href={resume} className="btn" data-variant="primary" data-size="lg">
+                <Icon name={chapters.length ? 'book' : 'pen'} size={18} />
+                {!chapters.length ? 'Write chapter one' : pct > 0 ? 'Continue reading' : 'Start reading'}
               </Link>
-              <button className="btn" aria-pressed={Boolean(novel.favorite)} onClick={toggleFav}>
-                {novel.favorite ? '★ Favourited' : '☆ Favourite'}
+              <button
+                className="icon-btn" data-bordered data-size="lg" aria-pressed={Boolean(novel.favorite)} onClick={toggleFav}
+                aria-label={novel.favorite ? 'Remove from favourites' : 'Add to favourites'} title="Favourite"
+              >
+                <Icon name="star" fill={Boolean(novel.favorite)} />
               </button>
-              <Link href={chapterNewHref(novel.id)} className="btn">Add chapter</Link>
-              {/* Only offered when it can actually do something. A browser with no
-                  handle API, or a book that was never linked, gets no dead button. */}
               {(link === 'linked' || link === 'needs-permission') && (
-                <button className="btn" onClick={sync} disabled={syncing}>
-                  {syncing
-                    ? 'Reading folder…'
-                    : link === 'needs-permission' ? 'Reconnect folder' : 'Refresh from folder'}
+                <button className="btn" data-size="lg" onClick={sync} data-loading={syncing || undefined}>
+                  <Icon name="refresh" size={17} />
+                  {link === 'needs-permission' ? 'Reconnect folder' : 'Refresh'}
                 </button>
               )}
-              <button className="btn danger" onClick={() => setConfirming(true)}>Remove</button>
+              <Menu
+                label="More actions"
+                items={[
+                  { label: 'New chapter', icon: 'plus', href: chapterNewHref(novel.id), hint: 'N' },
+                  { label: 'Manage chapters', icon: 'list', href: chaptersHref(novel.id) },
+                  { label: 'Edit details', icon: 'edit', onSelect: () => setEditing(true) },
+                  'sep',
+                  { label: 'Remove from device', icon: 'trash', tone: 'danger', onSelect: () => setConfirming(true) }
+                ]}
+              />
             </div>
+
+            {progress && pct > 0 && (
+              <Link href={progress.href} className="resume" style={{ textDecoration: 'none', color: 'inherit' }}>
+                <span className="rt"><span>Chapter {at + 1} of {chapters.length}</span><span>{pct}% · {ago(progress.at)}</span></span>
+                <p className="rc">{progress.chapterTitle}</p>
+                <span className="meter" style={{ ['--p' as string]: pct / 100 }} />
+              </Link>
+            )}
           </div>
         </header>
 
-        <div className="sechead">
-          <h2 className="sech title">Chapters</h2>
-          {chapters.length > 0 && (
-            <Link href={chapterNewHref(novel.id)} className="btn small">+ Add</Link>
-          )}
-        </div>
-
-        {chapters.length ? (
-          <ol className="toc">
-            {chapters.map((c, i) => (
-              <li key={c.slug}>
-                {/* The row reads; editing is its own affordance. A chapter list in a
-                    reading app that opens the editor on tap would be a trap. */}
-                <Link href={localChapterHref(novel.id, c.slug)} data-current={i === at || undefined}>
-                  <span className="caption mono n">{String(i + 1).padStart(2, '0')}</span>
-                  <span className="t">{c.title}</span>
-                  <span className="caption mono w">
-                    {i === at ? 'reading' : i < at ? 'read' : `${c.words.toLocaleString()} words`}
-                  </span>
-                </Link>
-                <Link
-                  href={chapterEditHref(novel.id, c.slug)}
-                  className="edit"
-                  aria-label={`Edit ${c.title}`}
-                  title="Edit"
-                >
-                  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
-                       strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                    <path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17v3Z" />
-                  </svg>
-                </Link>
-              </li>
-            ))}
-          </ol>
-        ) : (
-          <div className="blank">
-            <p className="title">No chapters yet</p>
-            <p className="caption">
-              Start with the first one and build the book a page at a time.
-            </p>
-            <Link href={chapterNewHref(novel.id)} className="btn" data-variant="primary">
-              Add the first chapter
-            </Link>
+        <section className="booksec" aria-labelledby="ch-h">
+          <div className="sechead">
+            <h2 id="ch-h" className="title">Contents</h2>
+            <span className="secacts">
+              <Link href={chaptersHref(novel.id)} className="btn" data-variant="ghost" data-size="sm">
+                <Icon name="list" size={15} /> Manage chapters
+              </Link>
+              <Link href={chapterNewHref(novel.id)} className="btn" data-size="sm"><Icon name="plus" size={15} /> New chapter</Link>
+            </span>
           </div>
-        )}
+          {drafts > 0 && (
+            <p className="caption draftnote">
+              {drafts} {drafts === 1 ? 'draft isn’t' : 'drafts aren’t'} shown to readers yet — find {drafts === 1 ? 'it' : 'them'} in{' '}
+              <Link href={chaptersHref(novel.id)}>Chapters</Link>.
+            </p>
+          )}
+          {chapters.length ? (
+            <ChapterList chapters={rows} current={at} marked={markedSlugs} />
+          ) : (
+            <div className="empty" style={{ marginTop: 0 }}>
+              <span className="glyph"><Icon name="pen" size={24} /></span>
+              <h3 className="title-3">{drafts ? 'Nothing ready to read yet' : 'No chapters yet'}</h3>
+              <p>{drafts ? 'Every chapter is still a draft. Mark one as ready on the Chapters page.' : 'Start with the first one and build the book a page at a time.'}</p>
+              <div className="actions">
+                <Link href={chapterNewHref(novel.id)} className="btn" data-variant="primary">Write the first chapter</Link>
+              </div>
+            </div>
+          )}
+        </section>
 
         {marks.length > 0 && (
-          <>
-            <h2 className="sech title">Bookmarks</h2>
+          <section className="booksec" aria-labelledby="bm-h">
+            <div className="sechead"><h2 id="bm-h" className="title">Bookmarks</h2></div>
             <ul className="marks">
               {marks.map(b => (
                 <li key={b.id}>
                   <Link href={b.href} className="mark">
-                    <span className="mt">{b.chapterTitle}</span>
+                    <span className="mt"><Icon name="bookmark" size={14} fill /> {b.chapterTitle} <span className="caption">· {ago(b.at)}</span></span>
                     {b.note && <span className="mq">“{b.note}”</span>}
                   </Link>
-                  <button
-                    className="mx"
-                    aria-label={`Remove bookmark in ${b.chapterTitle}`}
-                    onClick={async () => {
-                      setMarks(m => m.filter(x => x.id !== b.id));
-                      await deleteBookmark(b.id).catch(() => load());
-                    }}
-                  >✕</button>
+                  <button className="icon-btn" data-size="sm" aria-label={`Remove bookmark in ${b.chapterTitle}`} onClick={() => dropMark(b)}>
+                    <Icon name="close" size={15} />
+                  </button>
                 </li>
               ))}
             </ul>
-          </>
+          </section>
         )}
       </main>
+
+      <DetailsDialog
+        open={editing}
+        novel={novel}
+        onClose={() => setEditing(false)}
+        onSave={async patch => {
+          const next = { ...novel, ...patch };
+          try {
+            await putNovel(next);
+            setNovel(next);
+            setEditing(false);
+            toast({ message: 'Details saved', tone: 'ok' });
+          } catch {
+            toast({ message: 'Couldn’t save — this browser is blocking storage.', tone: 'err' });
+          }
+        }}
+      />
 
       <ConfirmDialog
         open={confirming}
         title={`Remove “${novel.title}”?`}
-        body="Every chapter, your place in the book and its bookmarks are deleted from this device. There is no undo."
+        body="Every chapter, your place in the book and its bookmarks are deleted from this device. You’ll have a few seconds to undo."
         onDismiss={() => setConfirming(false)}
         choices={[
           { label: 'Keep it', onPick: () => setConfirming(false), variant: 'primary' },
@@ -271,94 +304,87 @@ function NovelBody() {
       />
 
       <style jsx>{`
-        .hero .cover {
-          display: grid; place-items: center;
-          width: clamp(7rem, 20vw, 11rem); aspect-ratio: 2/3;
-          border-radius: var(--r-panel); font-family: var(--serif); font-size: 3rem; color: var(--ink-faint);
-          background: color-mix(in oklab, var(--ink) 6%, transparent);
-          box-shadow: var(--e-3);
-        }
-        .det { flex: 1 1 20rem; min-width: 0; }
-        .folder { margin: 0 0 var(--s-4); color: var(--ink-faint); }
-        .folder[data-state='needs-permission'] { color: var(--warn); }
-        .sync {
-          margin: 0 0 var(--s-4); padding: var(--s-3) var(--s-4);
-          border: 1px solid var(--rule); border-radius: var(--r-control);
-          background: var(--ok-bg); color: var(--ink);
-          display: flex; gap: var(--s-4); align-items: baseline; justify-content: space-between;
-          max-width: 34rem;
-        }
-        .prog { margin: 0 0 1.25rem; max-width: 22rem; }
-        .track {
-          display: block; height: 4px; border-radius: var(--r-round); margin-bottom: 0.4rem;
-          background: color-mix(in oklab, var(--ink) 14%, transparent);
-        }
-        .track :global(span) { display: block; height: 100%; border-radius: var(--r-round); background: var(--accent); }
-        .cta :global(a) { text-decoration: none; }
-        .danger { color: var(--err); }
-        .danger:hover { border-color: var(--err); background: var(--err-bg); }
-        .sechead {
-          display: flex; align-items: baseline; justify-content: space-between; gap: var(--s-5);
-          margin: clamp(2.5rem, 6vw, 3.5rem) 0 var(--s-4);
-        }
-        .sechead :global(.small) { flex: none; font-size: 0.78rem; text-decoration: none; }
-        .sech { margin: clamp(2.5rem, 6vw, 3.5rem) 0 var(--s-4); }
-        .sechead .sech { margin: 0; }
-
-        /* Row = read, trailing button = edit. Overriding the global .toc grid, which
-           assumes the link is the whole row. */
-        .toc li { display: flex; align-items: stretch; gap: var(--s-1); }
-        .toc :global(a:not(.edit)) { flex: 1; min-width: 0; }
-        .toc :global(.edit) {
-          flex: none; display: grid; place-items: center; width: 2.4rem;
-          color: var(--ink-faint); border-radius: var(--r-tight); text-decoration: none;
-          transition: color var(--quick), background-color var(--quick);
-        }
-        .toc :global(.edit:hover) { color: var(--ink); background: color-mix(in oklab, var(--ink) 8%, transparent); }
-        .toc :global(.edit:focus-visible) { outline: var(--focus); outline-offset: -2px; }
-
-        .blank {
-          display: grid; justify-items: center; gap: var(--s-3); text-align: center;
-          padding: clamp(var(--s-7), 7vw, var(--s-8)) var(--s-5);
-          border: 1px dashed var(--rule); border-radius: var(--r-panel);
-        }
-        .blank p { margin: 0; max-width: 24rem; }
-        .blank :global(a) { margin-top: var(--s-2); text-decoration: none; }
-        .toc :global(a[data-current]) { background: color-mix(in oklab, var(--accent) 10%, transparent); }
-        .toc :global(a[data-current] .t) { color: var(--accent); }
-        .none { padding: 1rem 0.5rem; border-top: 1px solid var(--rule); }
-        .linkish {
-          background: none; border: 0; padding: 0; font: inherit; color: var(--accent);
-          cursor: pointer; text-decoration: underline; text-underline-offset: 0.16em;
-        }
-        .marks { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; }
-        .marks li { display: flex; align-items: center; gap: 0.4rem; border-top: 1px solid var(--rule); }
-        .marks li:last-child { border-bottom: 1px solid var(--rule); }
-        /* <Link> again: scoped from the list, since styled-jsx only marks host elements. */
+        .marks { list-style: none; margin: 0; padding: 0; display: grid; }
+        .marks li { display: flex; align-items: center; gap: var(--s-2); }
+        .marks li + li { box-shadow: 0 -1px 0 var(--rule); }
         .marks :global(.mark) {
-          flex: 1; min-width: 0; display: grid; gap: 0.2rem; padding: 0.8rem 0.5rem;
-          color: var(--ink); text-decoration: none; border-radius: 0.6rem;
-          transition: background-color var(--quick);
+          flex: 1; min-width: 0; display: grid; gap: var(--s-1); padding: var(--s-4) var(--s-3);
+          color: var(--ink); text-decoration: none; border-radius: var(--r-sm);
+          transition: background-color var(--dur-2);
         }
-        .marks :global(.mark:hover) { background: color-mix(in oklab, var(--ink) 5%, transparent); }
-        .marks :global(.mt) { font-size: 0.95rem; }
+        .marks :global(.mark:hover) { background: var(--fill); }
+        .marks :global(.mt) { display: flex; align-items: center; gap: var(--s-2); font-size: var(--t-callout); font-weight: 500; }
+        .marks :global(.mt svg) { color: var(--accent); }
         .marks :global(.mq) {
-          font-family: var(--serif); font-style: italic; color: var(--ink-dim); font-size: 0.92rem;
+          font-family: var(--font-serif); font-style: italic; color: var(--ink-2); font-size: 0.95rem; line-height: 1.5;
           display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
         }
-        .mx {
-          flex: none; width: 2.2rem; height: 2.2rem; border-radius: 0.5rem; border: 0;
-          background: transparent; color: var(--ink-dim); cursor: pointer;
-        }
-        .mx:hover { background: color-mix(in oklab, var(--ink) 10%, transparent); color: var(--ink); }
+        :global(.inl) { display: inline; vertical-align: -2px; }
+        .secacts { display: flex; gap: var(--s-2); flex-wrap: wrap; justify-content: flex-end; }
+        .draftnote { margin: 0 0 var(--s-4); }
+        .draftnote :global(a) { color: var(--accent); }
       `}</style>
     </>
   );
 }
 
+function DetailsDialog({
+  open, novel, onClose, onSave
+}: {
+  open: boolean; novel: StoredNovel; onClose: () => void;
+  onSave: (p: Pick<StoredNovel, 'title' | 'author' | 'genre'>) => void;
+}) {
+  const [title, setTitle] = useState(novel.title);
+  const [author, setAuthor] = useState(novel.author ?? '');
+  const [genre, setGenre] = useState(novel.genre ?? '');
+  useEffect(() => {
+    if (open) { setTitle(novel.title); setAuthor(novel.author ?? ''); setGenre(novel.genre ?? ''); }
+  }, [open, novel]);
+  const bad = !title.trim();
+
+  return (
+    <Dialog
+      open={open}
+      onClose={onClose}
+      title="Book details"
+      size="md"
+      footer={
+        <>
+          <button className="btn" data-variant="ghost" onClick={onClose}>Cancel</button>
+          <button className="btn" data-variant="primary" form="details-form" type="submit" disabled={bad}>Save</button>
+        </>
+      }
+    >
+      <form
+        id="details-form"
+        style={{ display: 'grid', gap: 'var(--s-5)' }}
+        onSubmit={e => {
+          e.preventDefault();
+          if (bad) return;
+          onSave({ title: title.trim(), author: author.trim() || undefined, genre: genre.trim() || undefined });
+        }}
+      >
+        <label className="field">
+          <span className="label">Title</span>
+          <input className="input" value={title} onChange={e => setTitle(e.target.value)} data-autofocus aria-invalid={bad || undefined} required />
+          {bad && <span className="hint" style={{ color: 'var(--err)' }}>A book needs a title.</span>}
+        </label>
+        <label className="field">
+          <span className="label">Author</span>
+          <input className="input" value={author} onChange={e => setAuthor(e.target.value)} placeholder="Optional" />
+        </label>
+        <label className="field">
+          <span className="label">Genre</span>
+          <input className="input" value={genre} onChange={e => setGenre(e.target.value)} placeholder="e.g. fantasy — also tunes cinematic effects" />
+        </label>
+      </form>
+    </Dialog>
+  );
+}
+
 export default function NovelScreen() {
   return (
-    <Suspense fallback={<main className="wrap"><p className="caption">Opening…</p></main>}>
+    <Suspense fallback={<BookSkeleton />}>
       <NovelBody />
     </Suspense>
   );

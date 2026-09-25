@@ -36,7 +36,32 @@ lib/library.ts           IndexedDB: novels, progress, folder handle
 lib/mode.ts              capability flags
 lib/voices.ts            voice naming (accent + gender + timbre)
 lib/seo.ts               metadata + JSON-LD
+lib/theme.ts             light/dark/system + the pre-paint BOOT_SCRIPT (no theme flash)
+lib/reading.ts           reader prefs (size, leading, measure, face) as CSS vars
+lib/ui.ts                usePresence (exit animations), useModal (focus trap/restore)
+lib/useNovel.ts          one loader for local-novel screens (reloads on onLibraryChanged)
+lib/chapters.ts          pure chapter rules: order, move, duplicate, drafts (readableChapters)
+
+app/styles/tokens.css    every colour, size, radius, shadow, duration — both themes
+app/styles/components.css  primitives: .btn .icon-btn .seg .switch .chip .meter .input …
+components/ReaderShell   the one reading room for local AND published novels
+components/ChapterList   search / filter / grouped-by-50 chapter list (novel page + drawer)
+components/Toaster       toast() from anywhere, with Undo; survives navigation
 ```
+
+### Routes (query params, because a static export can't prerender a folder imported later)
+
+```
+/library                          the shelf
+/novel?id=<id>                    a book, reading side: continue, contents, bookmarks
+/novel/chapters?id=<id>           the same book, writing side: order, drafts, duplicate, delete
+/write?novel=<id>&chapter=<slug>  the chapter editor (chapter=new for a blank one)
+/read?novel=<id>&chapter=<slug>   the reader
+/n/<slug>[/<chapter>]             published novels (real paths — known at build time)
+```
+
+Drafts (`StoredChapter.draft`) are hidden from every reading surface — reader, contents,
+library counts, ⌘K — and shown only on `/novel/chapters` and in the editor.
 
 ### Non-obvious things that will bite you
 
@@ -53,6 +78,20 @@ lib/seo.ts               metadata + JSON-LD
   so an app update never re-downloads 80MB of weights.
 - **Kokoro loads only on user intent**, never at page load, and synthesises in a Web
   Worker (`lib/reader/tts.worker.ts`) so inference never blocks the highlight loop.
+- **styled-jsx only scopes JSX in the returned tree.** Markup built in a helper or a
+  `const` above the return gets no scoped class. Such pieces use global, prefixed CSS
+  (`.chlist …`, `.libgrid`, `.chead`) — see `components/ChapterList.tsx`.
+- **Never animate `transform` on an ancestor of a fixed overlay.** It becomes their
+  containing block (the player rides the page). `template.tsx` fades opacity only, with
+  `backwards` fill; chapter entrances animate `.page`, never the player's parent.
+- **Themes are resolved before paint** by `BOOT_SCRIPT` in `<head>`. Don't move theme or
+  reading-pref application into an effect — that reintroduces the flash.
+- **The editor stays mounted across chapters.** Back/Forward and the switcher only change
+  the query string, so the load effect flushes the *leaving* chapter's pending save before
+  switching, and neighbours are computed from the URL's chapter, not the loaded one.
+- **`backdrop-filter` and `content-visibility` both create containment.** A frosted bar
+  becomes the containing block of any fixed child; a `content-visibility` row clips its
+  open menu. Both bit this app once — see the editor bar and `.cm-row:has(...)`.
 - **Audio is scheduled, not started.** Clips are placed on `AudioContext.currentTime` at
   the exact moment the previous one ends, and the player banks a reserve ahead of the
   play head. Anything that starts a clip with a bare `start()` reintroduces the gap.
@@ -73,8 +112,9 @@ must stay handled. Reduced motion means a gentler equivalent, not a dead UI — 
 
 - No CSS framework, no state library, no animation library. Plain functions.
 - Mark deliberate simplifications with a `ponytail:` comment naming the ceiling.
-- Verify before claiming done: build both targets, and check the highlight actually
-  tracks through a paragraph containing italics and dialogue.
+- Verify before claiming done: `npm run check`, build both targets, then
+  `npm run build:static && npm run test:e2e` (drives the static build end to end; checks
+  that every word is wrapped for narration through italics and dialogue).
 
 ## Env
 
